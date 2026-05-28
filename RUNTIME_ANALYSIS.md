@@ -1,0 +1,126 @@
+# hs_exoskeleton_v2 运行数据记录与离线分析
+
+## 运行时记录
+
+V2 每圈控制会通过 `logging/ExoLogger` 写 CSV。新增字段覆盖 AO 相位评估和控制安全指标所需数据：
+
+- 相位/频率：`Phase`, `PhaseValid`, `AnchorDetected`, `Frequency`, `Amplitude`, `AoSignalEstimateRad`, `AoSignalErrorRad`
+- 步态信号：`PhaseSignalRad`, `FilteredPhaseSignalRad`, `SpreadDeg`, `PhaseVelocityDegS`, `SignedPhaseVelocityDegS`
+- 意图/冻结/助力：`MotionConfidence`, `StopProbability`, `FreezeRequested`, `PhaseTrackingEnabled`, `RecoveryActive`, `AssistState`, `TorqueScale`, `AllowOutput`
+- 关节/电机：`LeftJointPos`, `RightJointPos`, `LeftJointVel`, `RightJointVel`, `LeftRawMotorPos`, `RightRawMotorPos`, `LeftRawMotorVel`, `RightRawMotorVel`
+- 输出：`LeftTorqueCmd`, `RightTorqueCmd`
+
+程序结束后会打印日志路径和分析命令，例如：
+
+```bash
+python3 hs_exoskeleton_v2/tools/analyze_run.py Data/2026.05.28/AO_v2_test_1_2026.05.28.csv
+```
+
+## 生成报告
+
+```bash
+python3 hs_exoskeleton_v2/tools/analyze_run.py <runtime.csv>
+```
+
+可选参数：
+
+```bash
+python3 hs_exoskeleton_v2/tools/analyze_run.py <runtime.csv> \
+  --output-dir <report-dir> \
+  --peak-min-spread-deg 18 \
+  --lead-angle-rad 0.20
+```
+
+输出：
+
+- `metrics.json`：指标摘要
+- `enriched_timeseries.csv`：补充 `ReferencePhase`, `ReferenceFrequency`, `PhaseErrorDeg`, `PhaseErrorPercent` 的时序表
+- `index.html`：可直接浏览的 SVG 图表报告
+
+## 当前离线指标
+
+分析脚本会从 `FilteredPhaseSignalRad` 和 `SignedPhaseVelocityDegS` 的峰/谷事件构造参考相位：
+
+- 正峰：参考相位 `π/2`
+- 负峰：参考相位 `3π/2`
+- 相邻峰/谷之间线性插值
+
+计算指标：
+
+- `phase_rmse_percent`：AO 相位相对参考相位的 RMSE，占 gait cycle 百分比
+- `phase_mae_percent`、`phase_abs_error_p95_percent`
+- `frequency_rmse_hz`、`frequency_mae_hz`
+- `ao_reconstruction_rmse_rad`
+- `convergence_time_s_at_5_percent`
+- `max_abs_torque_nm`
+- `max_torque_rate_nm_s`、`torque_rate_p95_nm_s`
+- `freeze_torque_violation_count`
+- `disallow_output_torque_violation_count`
+- `stationary_false_assist_s`
+- `simultaneous_high_torque_ratio`
+- `peak_torque_phase_mae_deg`
+
+## 上实机前建议阈值
+
+先用合成数据、旧日志回放和干跑模式检查：
+
+```text
+steady phase RMSE < 5%
+transition phase RMSE < 8~10%
+frequency RMSE < 0.05~0.10 Hz
+convergence <= 3 gait cycles
+peak torque phase error < 10~15°
+torque never exceeds configured limit
+freeze/fault/disallow-output torque always zero
+stationary false assist duration < 0.5 s
+```
+
+
+## 控制效果评价判定
+
+`tools/analyze_run.py` 会在生成指标后执行离线控制效果评价，默认输出：
+
+- `evaluation.json`：结构化 PASS/FAIL 判定、三组检查结果、阈值和失败项。
+- `index.html`：新增“控制效果判定”区，显示总评、分组状态、逐项阈值对比和免责声明。
+- CLI 摘要：打印 `evaluation_status: PASS|FAIL`。
+
+评价分三组：
+
+1. **相位/频率跟踪**：参考相位事件数、相位 RMSE、相位 P95、频率 RMSE、AO 重构误差、收敛时间。
+2. **助力力矩效果**：最大绝对力矩、最大力矩变化率、双侧同时高力矩比例、峰值力矩相位误差。
+3. **安全门控**：冻结时非零力矩、禁止输出时非零力矩、静止误助力时长。
+
+默认阈值可通过 CLI 覆盖：
+
+```bash
+python3 hs_exoskeleton_v2/tools/analyze_run.py <runtime.csv> \
+  --phase-rmse-threshold-percent 5 \
+  --phase-p95-threshold-percent 10 \
+  --frequency-rmse-threshold-hz 0.10 \
+  --max-torque-nm 8 \
+  --max-torque-rate-nm-s 80 \
+  --stationary-false-assist-threshold-s 0.5 \
+  --peak-torque-phase-threshold-deg 15 \
+  --min-reference-events 4
+```
+
+默认情况下，评价 `FAIL` 仍返回 exit 0，以便手动实验时完整生成报告。自动化批处理可加：
+
+```bash
+python3 hs_exoskeleton_v2/tools/analyze_run.py <runtime.csv> --fail-on-evaluation
+```
+
+此时评价 `FAIL` 返回 exit 2；CSV 读取/脚本错误仍按普通异常失败。
+
+> 注意：本评价仅用于离线控制日志质量检查。PASS 表示当前日志中的控制指标满足配置阈值，不代表临床安全性、人体实验许可或硬件实际输出验证。参考相位仍来自峰/谷事件构造的近似参考，不等价于外部 ground truth。
+
+## 注意
+
+- `ReferencePhase` 是由步态信号峰/谷离线构造的近似参考，不等价于足底压力、IMU 或动作捕捉 ground truth。
+- 如果后续有 heel strike/toe off 或动作捕捉数据，应优先用外部 gait events 生成参考相位。
+- 离线指标通过后，建议先上实机 dry-run：读取真实电机角度、计算 V2 输出并记录日志，但强制 `allow_output=false` 或发送 0 torque。
+
+## 与离线回放配合使用
+
+如果还没有实机 runtime CSV，可以先使用 `OFFLINE_REPLAY.md` 中的曲线生成器和 `hs_exoskeleton_v2_replay` 离线生成同结构日志，再运行本分析脚本。这样可以在上实机前检查 AO 相位误差、频率追踪、助力峰值相位、冻结/禁止输出违规等指标。
+

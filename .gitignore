@@ -1,0 +1,34 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Build outputs
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Runtime/generated data
+Data/
+*_analysis/
+metrics.json
+evaluation.json
+enriched_timeseries.csv
+index.html
+
+# Local tooling/state
+.omx/
+.codex/
+.vscode/
+
+# OS/editor noise
+.DS_Store
+*.swp
+*.tmp
