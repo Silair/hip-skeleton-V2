@@ -92,6 +92,8 @@ def diagnose_segment(
 
     candidate_count = sum(1 for row in rows if fnum(row, "AnchorCandidate", 0.0) >= 0.5)
     detected_count = sum(1 for row in rows if fnum(row, "AnchorDetected", 0.0) >= 0.5)
+    startup_prior_candidate_count = sum(1 for row in rows if fnum(row, "StartupPriorCandidate", 0.0) >= 0.5)
+    startup_prior_applied_count = sum(1 for row in rows if fnum(row, "StartupPriorApplied", 0.0) >= 0.5)
 
     spread_p95 = percentile(spreads, 95.0)
     velocity_p95 = percentile(velocities_abs, 95.0)
@@ -140,6 +142,8 @@ def diagnose_segment(
         "velocity_sign_change_count": count_velocity_sign_changes(signed_velocities),
         "candidate_count": candidate_count,
         "anchor_detected_count": detected_count,
+        "startup_prior_candidate_count": startup_prior_candidate_count,
+        "startup_prior_applied_count": startup_prior_applied_count,
         "anchor_min_spread_deg": anchor_min_spread_deg,
         "anchor_min_velocity_deg_s": anchor_min_velocity_deg_s,
         "spread_below_threshold": spread_p95 is not None and spread_p95 < anchor_min_spread_deg,
@@ -196,7 +200,11 @@ def main() -> None:
     )
     print(f"  filtered_amp_rad: {summary['filtered_phase_signal_amplitude_rad']:.4f}")
     print(f"  zero_cross={summary['zero_cross_count']} sign_changes={summary['velocity_sign_change_count']}")
-    print(f"  candidates={summary['candidate_count']} detected={summary['anchor_detected_count']}")
+    print(
+        f"  candidates={summary['candidate_count']} detected={summary['anchor_detected_count']} "
+        f"startup_prior_cand={summary.get('startup_prior_candidate_count', 0)} "
+        f"startup_prior_applied={summary.get('startup_prior_applied_count', 0)}"
+    )
     print(f"  likely_causes: {summary['likely_causes']}")
 
     if args.json_output:

@@ -255,11 +255,192 @@ void PhaseEstimator::processAnchorEvent(const AnchorEventContext& ctx,
     has_frequency_anchor_ = true;
 }
 
+void PhaseEstimator::resetStartupPriorState() {
+    last_motion_confidence_ = 0.0;
+    last_spread_deg_ = 0.0;
+    same_sign_velocity_frames_ = 0;
+    spread_increase_frames_ = 0;
+    velocity_sign_ = 0;
+    last_zero_cross_time_s_ = -10.0;
+    startup_frequency_prior_hz_ = 0.0;
+    startup_confidence_ = 0.0;
+    has_startup_prior_ = false;
+    startup_prior_from_zero_cross_ = false;
+    startup_prior_applied_ = false;
+    startup_tracking_enter_time_s_ = -10.0;
+}
+
+void PhaseEstimator::updateStartupPrior(const GaitFeatures& features,
+                                         AssistState assist_state,
+                                         double stop_probability,
+                                         double motion_confidence,
+                                         bool tracking_enabled,
+                                         bool positive_peak,
+                                         bool negative_peak,
+                                         PhaseEstimate& estimate) {
+    if (!config_.enable_startup_frequency_prior || !tracking_enabled) {
+        return;
+    }
+
+    const bool startup_state =
+        assist_state == AssistState::Tracking || assist_state == AssistState::Ramp;
+    const bool stop_ok = stop_probability < config_.startup_prior_max_stop_probability;
+    const bool motion_rising =
+        motion_confidence >= last_motion_confidence_ + config_.startup_prior_motion_confidence_rise;
+    const bool motion_ok = motion_confidence >= config_.startup_prior_min_motion_confidence;
+    const bool motion_buildup_ok = motion_ok && (motion_rising || motion_confidence >= 0.52);
+
+    if (startup_state && tracking_enabled && startup_tracking_enter_time_s_ < -5.0) {
+        startup_tracking_enter_time_s_ = now_s_;
+    }
+    if (!startup_state || !stop_ok || startup_prior_applied_) {
+        last_motion_confidence_ = motion_confidence;
+        last_spread_deg_ = features.spread_deg;
+        return;
+    }
+
+    const double curr_velocity_deg_s = features.signed_phase_velocity_deg_s;
+    int sign = 0;
+    if (curr_velocity_deg_s > config_.startup_prior_min_velocity_deg_s) {
+        sign = 1;
+    } else if (curr_velocity_deg_s < -config_.startup_prior_min_velocity_deg_s) {
+        sign = -1;
+    }
+    if (sign != 0 && sign == velocity_sign_) {
+        same_sign_velocity_frames_ += 1;
+    } else if (sign != 0) {
+        velocity_sign_ = sign;
+        same_sign_velocity_frames_ = 1;
+    } else {
+        same_sign_velocity_frames_ = 0;
+        velocity_sign_ = 0;
+    }
+
+    if (features.spread_deg > last_spread_deg_ + 1e-3) {
+        spread_increase_frames_ += 1;
+    } else if (features.spread_deg < last_spread_deg_ - 1e-3) {
+        spread_increase_frames_ = 0;
+    }
+
+    if (positive_peak || negative_peak) {
+        if (last_zero_cross_time_s_ > -5.0) {
+            const double half_period_s = now_s_ - last_zero_cross_time_s_;
+            if (half_period_s >= config_.anchor_min_interval_s && half_period_s <= config_.anchor_max_interval_s) {
+                startup_frequency_prior_hz_ = std::clamp(
+                    0.5 / half_period_s,
+                    config_.startup_prior_frequency_min_hz,
+                    config_.startup_prior_frequency_max_hz);
+                startup_prior_from_zero_cross_ = true;
+            }
+        }
+        last_zero_cross_time_s_ = now_s_;
+    }
+
+    if (startup_prior_from_zero_cross_ &&
+        startup_frequency_prior_hz_ >= config_.startup_prior_frequency_min_hz) {
+        has_startup_prior_ = true;
+    }
+
+    const bool buildup_ok = motion_buildup_ok &&
+                            same_sign_velocity_frames_ >= config_.startup_prior_same_sign_frames &&
+                            spread_increase_frames_ >= config_.startup_prior_spread_increase_frames &&
+                            features.spread_deg >= config_.anchor_min_spread_deg;
+
+    if (buildup_ok) {
+        estimate.startup_prior_candidate = true;
+        const double sign_score = clamp01(
+            static_cast<double>(same_sign_velocity_frames_) /
+            std::max(config_.startup_prior_same_sign_frames, 1));
+        const double spread_score = clamp01(
+            static_cast<double>(spread_increase_frames_) /
+            std::max(config_.startup_prior_spread_increase_frames, 1));
+        const double motion_score = clamp01(
+            (motion_confidence - config_.startup_prior_min_motion_confidence) /
+            std::max(1.0 - config_.startup_prior_min_motion_confidence, 1e-6));
+        startup_confidence_ = 0.35 * sign_score + 0.35 * spread_score + 0.30 * motion_score;
+
+        if (has_startup_prior_) {
+            estimate.startup_prior_valid = true;
+            estimate.startup_prior_frequency_hz = startup_frequency_prior_hz_;
+            estimate.startup_prior_confidence = startup_confidence_;
+        }
+    }
+
+    last_motion_confidence_ = motion_confidence;
+    last_spread_deg_ = features.spread_deg;
+}
+
+void PhaseEstimator::tryApplyStartupPrior(const AnchorEventContext& ctx,
+                                          PhaseEstimate& estimate,
+                                          double omega_before_rad_s) {
+    if (!config_.enable_startup_frequency_prior || !has_startup_prior_ || startup_prior_applied_) {
+        return;
+    }
+    if (!ctx.tracking_enabled) {
+        return;
+    }
+    const double apply_confidence =
+        startup_prior_from_zero_cross_
+            ? std::max(startup_confidence_, config_.startup_prior_min_confidence_to_apply)
+            : startup_confidence_;
+    if (apply_confidence < config_.startup_prior_min_confidence_to_apply) {
+        return;
+    }
+    if (now_s_ - startup_tracking_enter_time_s_ < config_.startup_prior_min_apply_time_s) {
+        return;
+    }
+    if (ctx.stop_probability >= config_.startup_prior_max_stop_probability) {
+        return;
+    }
+    if (ctx.assist_state == AssistState::Stopping || ctx.assist_state == AssistState::Frozen ||
+        ctx.assist_state == AssistState::Fault) {
+        return;
+    }
+
+    const bool in_ramp_or_active =
+        ctx.assist_state == AssistState::Ramp || ctx.assist_state == AssistState::Active;
+    const bool in_tracking_apply = config_.startup_prior_apply_during_tracking && ctx.tracking_enabled;
+    if (!in_ramp_or_active && !in_tracking_apply) {
+        return;
+    }
+    if (!in_ramp_or_active && !startup_prior_from_zero_cross_) {
+        return;
+    }
+
+    const double current_frequency_hz =
+        std::clamp(std::abs(oscillator_.omega) / (2.0 * M_PI), config_.ao_min_frequency_hz, config_.ao_max_frequency_hz);
+    double effective_gain = config_.startup_prior_gain * apply_confidence;
+    if (!in_ramp_or_active) {
+        effective_gain *= config_.startup_prior_tracking_gain_scale;
+    }
+    if (effective_gain <= 1e-6) {
+        return;
+    }
+
+    const double target_frequency_hz = std::clamp(
+        startup_frequency_prior_hz_,
+        config_.startup_prior_frequency_min_hz,
+        config_.startup_prior_frequency_max_hz);
+    const double blended_frequency_hz =
+        (1.0 - effective_gain) * current_frequency_hz + effective_gain * target_frequency_hz;
+    omega_target_rad_s_ = blended_frequency_hz * 2.0 * M_PI;
+    omega_target_tracking_active_ = true;
+    applyRateLimitedOmega(ctx.dt_s);
+
+    estimate.startup_prior_valid = true;
+    estimate.startup_prior_frequency_hz = startup_frequency_prior_hz_;
+    estimate.startup_prior_confidence = startup_confidence_;
+    estimate.startup_prior_applied = true;
+    estimate.omega_correction_hz = (oscillator_.omega - omega_before_rad_s) / (2.0 * M_PI);
+    startup_prior_applied_ = true;
+}
+
 PhaseEstimate PhaseEstimator::update(const GaitFeatures& features,
                                      double dt_s,
                                      bool tracking_enabled,
                                      AssistState assist_state,
-                                     double stop_probability) {
+                                     double stop_probability,
+                                     double motion_confidence) {
     now_s_ += dt_s;
     if (!tracking_enabled && previous_tracking_enabled_) {
         reliable_anchor_count_since_tracking_enable_ = 0;
@@ -267,6 +448,7 @@ PhaseEstimate PhaseEstimator::update(const GaitFeatures& features,
         omega_target_tracking_active_ = false;
         has_pending_anchor_ = false;
         has_deferred_frequency_correction_ = false;
+        resetStartupPriorState();
     }
     previous_tracking_enabled_ = tracking_enabled;
 
@@ -320,7 +502,18 @@ PhaseEstimate PhaseEstimator::update(const GaitFeatures& features,
         tracking_enabled,
     };
 
+    updateStartupPrior(
+        features,
+        assist_state,
+        stop_probability,
+        motion_confidence,
+        tracking_enabled,
+        positive_peak,
+        negative_peak,
+        estimate);
+
     tryApplyDeferredFrequencyCorrection(ctx, estimate, omega_before_rad_s);
+    tryApplyStartupPrior(ctx, estimate, omega_before_rad_s);
 
     if (config_.anchor_confirm_delay_frames > 0 && has_pending_anchor_) {
         if (confirmPendingAnchor(config_, pending_anchor_type_, curr_velocity_deg_s, features.spread_deg)) {
@@ -369,6 +562,7 @@ PhaseEstimate PhaseEstimator::update(const GaitFeatures& features,
     estimate.ao_signal_estimate_rad = oscillator_.theta_IL_hat;
     estimate.ao_signal_error_rad = oscillator_.error_F;
     estimate.valid = estimate.frequency_hz >= config_.ao_min_frequency_hz * 0.5;
+    previous_assist_state_ = assist_state;
     return estimate;
 }
 

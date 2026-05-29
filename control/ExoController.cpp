@@ -87,7 +87,12 @@ bool ExoController::run() {
         GaitFeatures features = feature_extractor_.update(state, controller_dt_s);
         const bool phase_tracking_enabled = freeze.phase_tracking_enabled && stop.phase_tracking_enabled;
         PhaseEstimate phase = phase_estimator_.update(
-            features, controller_dt_s, phase_tracking_enabled, last_assist_state_, last_stop_probability_);
+            features,
+            controller_dt_s,
+            phase_tracking_enabled,
+            last_assist_state_,
+            last_stop_probability_,
+            last_motion_confidence_);
         // 将相位估计的幅值/频率写回特征，供意图检测使用更一致的观测。
         features.amplitude_rad = phase.amplitude_rad;
         features.frequency_hz = phase.frequency_hz;
@@ -95,6 +100,7 @@ bool ExoController::run() {
         // ---------- 意图与冻结：输出 freeze 影响后续相位门控与最终力矩是否允许 ----------
         IntentEstimate intent = intent_detector_.update(features, controller_dt_s);
         last_stop_probability_ = intent.stop_probability;
+        last_motion_confidence_ = intent.motion_confidence;
         freeze = stop.stop_requested ? freeze_manager_.resetToLive() : freeze_manager_.update(intent, controller_dt_s);
 
         // ---------- 助力状态机：综合运动置信度、相位有效、锚点、冻结请求与健康 ----------

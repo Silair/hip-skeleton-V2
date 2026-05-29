@@ -147,6 +147,8 @@ app/main.cpp
 
 V2.2：`anchor_confirm_delay_frames` 延迟 1 帧确认峰/谷；`AnchorRejectReason` 与 `AnchorCandidate` 日志；Tracking 可靠 anchor 可 `enable_tracking_deferred_frequency` 延迟到 Ramp/Active 再校正频率。
 
+V2.2.1：`StartupPrior` 在 Tracking/Ramp 检测起步趋势，混合 `omega_target`（Tracking 半增益、Ramp/Active 全增益）；见 `docs/V22_1_STARTUP_PRIOR.md`。
+
 ### 5.6 意图检测：`control/IntentDetector.h/.cpp`
 
 输入：`GaitFeatures`，其中 `ExoController` 会用 `PhaseEstimate` 回填 `amplitude_rad`、`frequency_hz`。

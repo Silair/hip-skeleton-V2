@@ -86,6 +86,21 @@ struct PhaseConfig {
     int anchor_confirm_delay_frames = 1;
     bool enable_tracking_deferred_frequency = true;
     int reacquire_anchor_warmup_count = 2;
+
+    bool enable_startup_frequency_prior = true;
+    double startup_prior_gain = 0.20;
+    double startup_prior_max_stop_probability = 0.55;
+    double startup_prior_min_motion_confidence = 0.48;
+    double startup_prior_motion_confidence_rise = 0.0;
+    int startup_prior_same_sign_frames = 4;
+    int startup_prior_spread_increase_frames = 3;
+    double startup_prior_min_velocity_deg_s = 5.0;
+    double startup_prior_frequency_min_hz = 0.45;
+    double startup_prior_frequency_max_hz = 1.00;
+    bool startup_prior_apply_during_tracking = true;
+    double startup_prior_tracking_gain_scale = 0.50;
+    double startup_prior_min_apply_time_s = 0.50;
+    double startup_prior_min_confidence_to_apply = 0.45;
 };
 
 // 总控：主循环频率、单次运行时长，以及上面各子配置嵌套结构体。

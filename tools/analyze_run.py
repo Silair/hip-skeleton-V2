@@ -570,6 +570,17 @@ def compute_metrics(rows: Sequence[Dict[str, str]], peak_min_spread_deg: float =
         for row in rows
         if fnum(row, "AnchorFrequencyUpdated", 0.0) >= 0.5 and is_anchor_stop_context(row)
     )
+    startup_prior_candidate_count = sum(
+        1 for row in rows if fnum(row, "StartupPriorCandidate", 0.0) >= 0.5
+    )
+    startup_prior_applied_count = sum(
+        1 for row in rows if fnum(row, "StartupPriorApplied", 0.0) >= 0.5
+    )
+    startup_prior_frequencies_hz = [
+        fnum(row, "StartupPriorFrequencyHz", 0.0)
+        for row in rows
+        if fnum(row, "StartupPriorValid", 0.0) >= 0.5 and row.get("StartupPriorFrequencyHz", "") != ""
+    ]
     omega_corrections = [
         abs(fnum(row, "OmegaCorrectionHz", 0.0))
         for row in rows
@@ -625,6 +636,11 @@ def compute_metrics(rows: Sequence[Dict[str, str]], peak_min_spread_deg: float =
         "anchor_candidate_during_stop_count": anchor_candidate_during_stop_count,
         "anchor_rejected_during_stop_count": anchor_rejected_during_stop_count,
         "anchor_update_during_stop_count": anchor_update_during_stop_count,
+        "startup_prior_candidate_count": startup_prior_candidate_count,
+        "startup_prior_applied_count": startup_prior_applied_count,
+        "startup_prior_frequency_hz_mean": None
+        if not startup_prior_frequencies_hz
+        else mean(startup_prior_frequencies_hz),
         "omega_jump_p95_hz": percentile(omega_corrections, 95.0),
         "omega_jump_max_hz": max(omega_corrections) if omega_corrections else None,
     }

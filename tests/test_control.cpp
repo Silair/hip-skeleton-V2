@@ -222,6 +222,81 @@ void test_phase_estimator_delayed_confirm_rejects_single_frame_spike() {
     assert(failed.anchor_reject_reason == static_cast<int>(exo::AnchorRejectReason::ConfirmFailed));
 }
 
+void test_phase_estimator_builds_startup_prior_from_zero_cross() {
+    exo::ControlConfig config;
+    config.phase.enable_startup_frequency_prior = true;
+    config.phase.startup_prior_same_sign_frames = 2;
+    config.phase.startup_prior_spread_increase_frames = 2;
+    config.phase.anchor_confirm_delay_frames = 0;
+    exo::PhaseEstimator estimator(config.phase);
+    exo::GaitFeatures features{};
+
+    const double dt = 0.02;
+    bool saw_valid_prior = false;
+    for (int i = 0; i < 100; ++i) {
+        fill_sine_features(features, i * dt, 0.6);
+        features.spread_deg = std::max(features.spread_deg, 10.0 + i * 0.2);
+        const exo::PhaseEstimate estimate =
+            estimator.update(features, dt, true, exo::AssistState::Tracking, 0.1, 0.52);
+        if (estimate.startup_prior_valid && estimate.startup_prior_frequency_hz > 0.5) {
+            saw_valid_prior = true;
+            break;
+        }
+    }
+    assert(saw_valid_prior);
+}
+
+void test_phase_estimator_applies_startup_prior_on_ramp_entry() {
+    exo::ControlConfig config;
+    config.phase.anchor_confirm_delay_frames = 0;
+    config.phase.enable_startup_frequency_prior = true;
+    config.phase.startup_prior_same_sign_frames = 3;
+    config.phase.startup_prior_spread_increase_frames = 3;
+    config.phase.startup_prior_gain = 0.25;
+    config.phase.startup_prior_min_apply_time_s = 0.0;
+    config.phase.startup_prior_apply_during_tracking = false;
+    config.phase.startup_prior_min_confidence_to_apply = 0.0;
+    config.phase.anchor_confirm_delay_frames = 0;
+    exo::PhaseEstimator estimator(config.phase);
+    exo::GaitFeatures features{};
+
+    const double dt = 0.02;
+    exo::PhaseEstimate last{};
+    for (int i = 0; i < 100; ++i) {
+        fill_sine_features(features, i * dt, 0.6);
+        features.spread_deg = std::max(features.spread_deg, 8.0 + i * 0.2);
+        last = estimator.update(features, dt, true, exo::AssistState::Tracking, 0.1, 0.52);
+    }
+    assert(last.startup_prior_valid);
+    assert(last.startup_prior_frequency_hz >= config.phase.startup_prior_frequency_min_hz);
+
+    const exo::PhaseEstimate ramp_estimate =
+        estimator.update(features, dt, true, exo::AssistState::Ramp, 0.1, 0.55);
+    assert(ramp_estimate.startup_prior_applied || last.startup_prior_applied);
+    assert(ramp_estimate.startup_prior_frequency_hz >= config.phase.startup_prior_frequency_min_hz ||
+           last.startup_prior_frequency_hz >= config.phase.startup_prior_frequency_min_hz);
+}
+
+void test_phase_estimator_startup_prior_skipped_when_stop_probability_high() {
+    exo::ControlConfig config;
+    config.phase.enable_startup_frequency_prior = true;
+    config.phase.startup_prior_same_sign_frames = 2;
+    config.phase.startup_prior_spread_increase_frames = 2;
+    exo::PhaseEstimator estimator(config.phase);
+    exo::GaitFeatures features{};
+
+    const double dt = 0.02;
+    for (int i = 0; i < 6; ++i) {
+        features.spread_deg = 8.0 + i * 4.0;
+        features.signed_phase_velocity_deg_s = 40.0;
+        estimator.update(features, dt, true, exo::AssistState::Tracking, 0.1, 0.48 + i * 0.03);
+    }
+
+    const exo::PhaseEstimate ramp_estimate =
+        estimator.update(features, dt, true, exo::AssistState::Ramp, 0.9, 0.55);
+    assert(!ramp_estimate.startup_prior_applied);
+}
+
 void test_phase_estimator_applies_deferred_frequency_on_ramp_after_tracking() {
     exo::ControlConfig config;
     config.phase.anchor_confirm_delay_frames = 0;
@@ -544,6 +619,9 @@ int main() {
     test_phase_estimator_applies_anchor_frequency_updates_during_active_walking();
     test_phase_estimator_no_anchor_frequency_update_when_stop_probability_high();
     test_phase_estimator_delayed_confirm_rejects_single_frame_spike();
+    test_phase_estimator_builds_startup_prior_from_zero_cross();
+    test_phase_estimator_applies_startup_prior_on_ramp_entry();
+    test_phase_estimator_startup_prior_skipped_when_stop_probability_high();
     test_phase_estimator_applies_deferred_frequency_on_ramp_after_tracking();
     test_phase_estimator_reports_low_confidence_reject_reason();
     test_phase_estimator_no_anchor_frequency_update_when_stopping();

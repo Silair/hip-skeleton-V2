@@ -60,6 +60,7 @@ bool ExoLogger::open() {
     stream_ << "SyncSessionId,StreamId,LoopSeq,EpochMs,MonoTimeS,DtS,Healthy,AssistState,FreezeState,"
             << "MotionConfidence,StopProbability,Phase,PhaseValid,AnchorDetected,AnchorCandidate,Frequency,Amplitude,"
             << "AnchorFrequencyUpdated,AnchorRejected,AnchorRejectReason,AnchorMeasuredFrequencyHz,AnchorConfidence,OmegaCorrectionHz,"
+            << "StartupPriorValid,StartupPriorCandidate,StartupPriorApplied,StartupPriorFrequencyHz,StartupPriorConfidence,"
             << "AoSignalEstimateRad,AoSignalErrorRad,PhaseSignalRad,FilteredPhaseSignalRad,"
             << "SpreadDeg,PhaseVelocityDegS,SignedPhaseVelocityDegS,"
             << "FreezeRequested,PhaseTrackingEnabled,RecoveryActive,TorqueScale,AllowOutput,"
@@ -106,6 +107,11 @@ void ExoLogger::write(const ExoState& state,
             << phase.anchor_measured_frequency_hz << ','
             << phase.anchor_confidence << ','
             << phase.omega_correction_hz << ','
+            << (phase.startup_prior_valid ? 1 : 0) << ','
+            << (phase.startup_prior_candidate ? 1 : 0) << ','
+            << (phase.startup_prior_applied ? 1 : 0) << ','
+            << phase.startup_prior_frequency_hz << ','
+            << phase.startup_prior_confidence << ','
             << phase.ao_signal_estimate_rad << ','
             << phase.ao_signal_error_rad << ','
             << features.phase_signal_rad << ','

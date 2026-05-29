@@ -33,7 +33,8 @@ public:
                          double dt_s,
                          bool tracking_enabled,
                          AssistState assist_state,
-                         double stop_probability = 0.0);
+                         double stop_probability = 0.0,
+                         double motion_confidence = 0.0);
 
 private:
     enum class AnchorType {
@@ -82,6 +83,18 @@ private:
                             AnchorType anchor_type,
                             PhaseEstimate& estimate,
                             double omega_before_rad_s);
+    void resetStartupPriorState();
+    void updateStartupPrior(const GaitFeatures& features,
+                            AssistState assist_state,
+                            double stop_probability,
+                            double motion_confidence,
+                            bool tracking_enabled,
+                            bool positive_peak,
+                            bool negative_peak,
+                            PhaseEstimate& estimate);
+    void tryApplyStartupPrior(const AnchorEventContext& ctx,
+                              PhaseEstimate& estimate,
+                              double omega_before_rad_s);
 
     PhaseConfig config_;
     MultiHarmonicAO oscillator_;
@@ -102,6 +115,19 @@ private:
     bool has_deferred_frequency_correction_ = false;
     double deferred_measured_frequency_hz_ = 0.0;
     double deferred_confidence_ = 0.0;
+    double last_motion_confidence_ = 0.0;
+    double last_spread_deg_ = 0.0;
+    int same_sign_velocity_frames_ = 0;
+    int spread_increase_frames_ = 0;
+    int velocity_sign_ = 0;
+    double last_zero_cross_time_s_ = -10.0;
+    double startup_frequency_prior_hz_ = 0.0;
+    double startup_confidence_ = 0.0;
+    bool has_startup_prior_ = false;
+    bool startup_prior_from_zero_cross_ = false;
+    bool startup_prior_applied_ = false;
+    double startup_tracking_enter_time_s_ = -10.0;
+    AssistState previous_assist_state_ = AssistState::Transparent;
     double now_s_ = 0.0;
 };
 

@@ -38,6 +38,11 @@ struct PhaseEstimate {
     double anchor_confidence = 0.0;
     double omega_correction_hz = 0.0;
     int anchor_reject_reason = 0;
+    bool startup_prior_valid = false;
+    bool startup_prior_candidate = false;
+    bool startup_prior_applied = false;
+    double startup_prior_frequency_hz = 0.0;
+    double startup_prior_confidence = 0.0;
 };
 
 } // namespace exo

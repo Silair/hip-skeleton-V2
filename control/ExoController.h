@@ -40,6 +40,7 @@ private:
     TorqueCommand previous_torque_{};
     AssistState last_assist_state_ = AssistState::Transparent;
     double last_stop_probability_ = 0.0;
+    double last_motion_confidence_ = 0.0;
     Clock clock_;
 };
 
