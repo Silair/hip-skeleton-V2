@@ -162,7 +162,25 @@ python3 hs_exoskeleton_v2/tools/compare_metrics.py \
 如果还没有实机 runtime CSV，可以先使用 `OFFLINE_REPLAY.md` 中的曲线生成器和 `hs_exoskeleton_v2_replay` 离线生成同结构日志，再运行本分析脚本。这样可以在上实机前检查 AO 相位误差、频率追踪、助力峰值相位、冻结/禁止输出违规等指标。
 
 
-## TODO：双层 AO / Gait-Based AO 用于步频突变适应
+## TODO：V2.1 Anchor-based Gait AO Frequency Correction
+
+### 定位
+
+严格来说，V2.1 不应称为完整“双层 AO”复现。更准确的定位是：
+
+```text
+低层 AO 连续积分相位
++
+高层 gait anchor 事件离散校正频率
+```
+
+也就是 **lightweight gait-based AO / anchor-based frequency correction**。
+
+它受 **Effective Prediction of Gait Phase for Assisted Walking by Means of Gait-Based Adaptive Oscillators**（IEEE T-ASE 2025, DOI: `10.1109/TASE.2024.3520148`）中 two-level AO 思路启发，但暂不完整复刻论文的高层 stride learning、周期模板或幅值/相位形状学习。
+
+推荐表述：
+
+> 受 gait-based adaptive oscillator 中 two-level AO 思路启发，V2 暂不完整复刻其高层 stride learning，而是实现一个轻量化 anchor-based frequency correction。该方法保留当前单层 AO 的实时相位积分，同时利用可靠步态 anchor 对频率状态进行离散校正，以改善步频突变下的重新锁相速度。
 
 ### 背景
 
@@ -177,78 +195,377 @@ python3 hs_exoskeleton_v2/tools/compare_metrics.py \
 - `phase_rmse_percent` 升高；
 - `phase_abs_error_p95_percent` 升高；
 - `frequency_rmse_hz` 升高；
+- `frequency_adaptation_time_mean_s` / `combined_adaptation_time_mean_s` 偏大；
 - 频率变化导致力矩变化率接近或超过阈值。
 
-这和文献 **Effective Prediction of Gait Phase for Assisted Walking by Means of Gait-Based Adaptive Oscillators**（IEEE T-ASE 2025, DOI: `10.1109/TASE.2024.3520148`）讨论的问题一致：传统 AO 在稳态行走中有效，但在频繁 stop/go 或步频变化时通常需要多个 stride 才能同步，可能导致过渡期相位预测不准。
+根因链条：
 
-### 文献思路摘要
-
-该论文提出 gait-based adaptive oscillator，核心是 **two-level AO systems**：
-
-1. **高层 AO**
-   - 从上一 stride 学习步态参数；
-   - 提取上一 stride 的频率、幅值、相位等高层参数；
-   - 在新 stride 初期把学习到的参数传给低层 AO。
-
-2. **低层 AO**
-   - 实时估计当前 stride 的相位；
-   - 不完全从零开始适应，而是使用高层 AO 提供的初始/更新参数；
-   - 目标是在非稳态行走中更快同步。
-
-论文目标是减少传统 AO 在步频变化时的多周期收敛时间，使外骨骼辅助能更快、更稳定地跟上 stop/go 和 cadence change。
-
-### 当前 V2 的轻量化可行方案
-
-不建议一开始完整复刻论文中的双层 AO。当前 V2 可先实现一个轻量版：
-
-> **Anchor-based high-level frequency update**
-
-利用现有 `PhaseEstimator` 中的峰/谷 anchor 检测，在检测到可靠 anchor 后，用相邻 anchor 的时间间隔估计步频，并快速融合到低层 AO 的 `omega`。
-
-#### 初版算法草案
-
-峰到谷是半个周期，因此：
-
-```cpp
-measured_frequency_hz = 0.5 / (current_anchor_time_s - last_anchor_time_s);
+```text
+步频突变
+↓
+单层 AO 的 omega 适应滞后
+↓
+相位积分速度不匹配
+↓
+phase error 累积
+↓
+TorqueProfile 峰值时机偏移
+↓
+力矩变化率可能增大
 ```
 
-然后对低层 AO 的频率做快速融合：
+因此优先不要调 `lead_angle`、不要改冻结/停步，而是在 `PhaseEstimator` 上补一个可靠 gait anchor 频率校正层。
 
-```cpp
-oscillator_.omega =
-    (1.0 - anchor_frequency_gain) * oscillator_.omega +
-    anchor_frequency_gain * measured_frequency_hz * 2.0 * M_PI;
+### V2.1 核心方案
+
+当前只有髋关节角度和角速度，没有足底压力、IMU 或力传感器。最可用的 gait event 是：
+
+```text
+髋角信号峰 / 谷 / 速度换向点
 ```
 
-建议配置：
+第一版只使用 Peak / Valley anchor：
 
 ```cpp
-struct PhaseConfig {
-    ...
-    double anchor_frequency_gain = 0.45;
-    double anchor_frequency_min_hz = 0.45;
-    double anchor_frequency_max_hz = 1.60;
+enum class AnchorType {
+    Peak,
+    Valley,
 };
 ```
 
-必须保留保护条件：
+#### Anchor 类型与频率估计
 
-- anchor 间隔满足 `anchor_min_fraction_of_period`；
-- `spread_deg > peak_min_spread_deg`；
-- `measured_frequency_hz` 在合理范围内；
-- 停步 `Stopping` / `Frozen` 期间不更新高层频率。
+不能无条件使用：
 
-### 预期收益
+```cpp
+measured_frequency_hz = 0.5 / dt_anchor;
+```
 
-优先改善：
+该公式只适用于异类相邻 anchor：
 
-- `multi_rate` 的 `frequency_rmse_hz`；
-- `multi_rate` 的 `phase_rmse_percent` 和 `phase_abs_error_p95_percent`；
-- 步频突变后 AO 的重新锁相时间：
-  - `frequency_adaptation_time_mean_s`
-  - `phase_adaptation_time_mean_s`
-  - `combined_adaptation_time_mean_s`
+```text
+Peak -> Valley
+Valley -> Peak
+```
+
+保守第一版建议：
+
+```cpp
+if (last.type != current.type) {
+    measured_frequency_hz = 0.5 / dt_anchor;
+} else {
+    // Peak -> Peak 或 Valley -> Valley 可能来自漏检。
+    // 第一版先不更新，避免半频误估。
+    return;
+}
+```
+
+后续如果要支持同类 anchor，则应使用：
+
+```cpp
+measured_frequency_hz = 1.0 / dt_anchor;
+```
+
+#### Anchor 可靠性条件
+
+一个可靠 anchor 至少满足：
+
+```text
+角度幅值足够大
++
+角速度发生明确换向
++
+换向前后速度幅值足够大
++
+距离上一个 anchor 的时间合理
++
+当前处于允许更新的行走状态
+```
+
+伪代码：
+
+```cpp
+bool reliable_peak =
+    prev_velocity_deg_s > anchor_min_velocity_deg_s &&
+    curr_velocity_deg_s <= -anchor_min_velocity_deg_s &&
+    std::abs(position_deg) > anchor_min_spread_deg;
+
+bool reliable_valley =
+    prev_velocity_deg_s < -anchor_min_velocity_deg_s &&
+    curr_velocity_deg_s >= anchor_min_velocity_deg_s &&
+    std::abs(position_deg) > anchor_min_spread_deg;
+```
+
+如果单点噪声明显，后续再加 30~50 ms 方向一致性确认或过零滞回。
+
+#### Anchor confidence
+
+不要让所有 anchor 都用同一个高增益。建议：
+
+```cpp
+effective_gain = anchor_frequency_gain * anchor_confidence;
+```
+
+confidence 可由三部分构成：
+
+```cpp
+double interval_ratio = dt_anchor / predicted_half_period;
+double interval_score = clamp01(1.0 - std::abs(interval_ratio - 1.0) / 0.4);
+
+double amplitude_score = clamp01((spread_deg - anchor_min_spread_deg) / anchor_spread_margin_deg);
+double velocity_score = clamp01(anchor_velocity_abs_deg_s / anchor_velocity_reference_deg_s);
+
+double anchor_confidence =
+    0.4 * interval_score +
+    0.3 * amplitude_score +
+    0.3 * velocity_score;
+```
+
+只有：
+
+```cpp
+anchor_confidence >= anchor_min_confidence
+```
+
+才允许更新频率。
+
+#### 频率更新限幅
+
+即使 anchor 估计频率在合法范围内，也不能一次把 AO 频率拉飞。需要三层限制：
+
+1. 绝对范围：
+
+```cpp
+measured_frequency_hz = clamp(measured_frequency_hz,
+                              anchor_frequency_min_hz,
+                              anchor_frequency_max_hz);
+```
+
+2. 相对比例限制：
+
+```cpp
+double max_ratio = anchor_max_frequency_ratio;  // e.g. 1.35
+measured_frequency_hz = clamp(measured_frequency_hz,
+                              current_frequency_hz / max_ratio,
+                              current_frequency_hz * max_ratio);
+```
+
+3. 单次 step 限制：
+
+```cpp
+corrected_frequency_hz = moveToward(current_frequency_hz,
+                                    measured_frequency_hz,
+                                    anchor_max_frequency_step_hz);
+```
+
+最后再融合：
+
+```cpp
+double target_frequency_hz =
+    (1.0 - effective_gain) * current_frequency_hz +
+    effective_gain * corrected_frequency_hz;
+```
+
+工程上最好不要直接无约束写 `oscillator_.omega`，而是走目标频率/限速更新：
+
+```cpp
+omega_target = target_frequency_hz * 2.0 * M_PI;
+oscillator_.omega = moveToward(oscillator_.omega,
+                               omega_target,
+                               max_omega_rate_rad_s2 * dt);
+```
+
+### 状态门控
+
+`multi_rate` 是连续行走中的步频突变，适合 anchor 更新；`stop_go` / `noisy_stop_go` 含停止段，停止后第一个峰/谷可能只是姿态调整，不一定是真实步态周期。
+
+状态门控建议：
+
+| 状态 | Anchor 频率更新 |
+| --- | --- |
+| `Active` | 允许 |
+| `RampUp` | 低增益允许 |
+| `Reacquire` | 初期禁用，连续可靠 anchor 计数达到阈值后低增益/正常启用 |
+| `Stopping` | 禁止 |
+| `Frozen` | 禁止 |
+| `Fault` | 禁止 |
+
+第一版要求：
+
+```text
+Stopping / Frozen / Fault 禁止更新
+刚恢复行走时等待 2 个可靠 anchor
+Active walking 才允许正常增益更新
+```
+
+### 相位校正策略
+
+第一版 **只校正频率，不校正相位**：
+
+```cpp
+anchor_phase_gain = 0.0;
+```
+
+原因：直接把 phase 重置到 anchor phase 容易造成 TorqueProfile 力矩突跳。
+
+如果第一版后出现：
+
+```text
+frequency_rmse_hz 明显下降
+但 phase_rmse_percent / phase_abs_error_p95_percent 仍偏高
+```
+
+第二版再加入小幅相位校正：
+
+```cpp
+double anchor_phase = expectedPhaseForAnchor(current_anchor.type);
+double phase_error = wrapToPi(anchor_phase - oscillator_.phase);
+phase_error = clamp(phase_error, -max_anchor_phase_step_rad, max_anchor_phase_step_rad);
+oscillator_.phase += anchor_phase_gain * phase_error;
+```
+
+建议：
+
+```text
+anchor_phase_gain = 0.05 ~ 0.20
+max_anchor_phase_step = 5° ~ 10°
+```
+
+但 anchor phase 的定义必须和当前 `left + right` 步态信号、`TorqueProfile` 相位约定重新标定，不能随意填。
+
+### 推荐初版配置
+
+```cpp
+struct PhaseConfig {
+    // existing AO limits
+    double ao_min_frequency_hz = 0.45;
+    double ao_max_frequency_hz = 1.60;
+
+    // anchor frequency correction
+    bool enable_anchor_frequency_update = true;
+    double anchor_frequency_gain = 0.35;
+    double anchor_phase_gain = 0.0;  // V2.1 第一版先不校正相位
+    double anchor_frequency_min_hz = 0.45;
+    double anchor_frequency_max_hz = 1.60;
+
+    // anchor validation
+    double anchor_min_interval_s = 0.18;
+    double anchor_max_interval_s = 1.10;
+    double anchor_min_spread_deg = 4.0;
+    double anchor_min_velocity_deg_s = 8.0;
+    double anchor_refractory_s = 0.12;
+
+    // confidence / consistency gate
+    double anchor_spread_margin_deg = 8.0;
+    double anchor_velocity_reference_deg_s = 60.0;
+    double anchor_min_confidence = 0.55;
+    double anchor_max_frequency_ratio = 1.35;
+    double anchor_max_frequency_step_hz = 0.20;
+    double max_omega_rate_rad_s2 = 8.0;
+
+    // state gating
+    bool disable_anchor_update_during_stopping = true;
+    bool disable_anchor_update_during_frozen = true;
+    int reacquire_anchor_warmup_count = 2;
+};
+```
+
+建议调参顺序：
+
+```text
+anchor_frequency_gain = 0.30 ~ 0.35
+anchor_max_frequency_ratio = 1.30 ~ 1.40
+anchor_max_frequency_step_hz = 0.15 ~ 0.20
+anchor_phase_gain = 0.0
+```
+
+### 分阶段实现
+
+#### 第一版：可靠 anchor + 受限频率校正
+
+实现：
+
+```text
+检测 Peak/Valley anchor
+↓
+判断 anchor 是否可靠
+↓
+只用相邻异类 anchor 估计半周期频率
+↓
+对 measured_frequency 做 min/max、ratio limit、step limit
+↓
+按 confidence 加权融合到 omega target
+↓
+通过 omega rate limit 更新 oscillator_.omega
+↓
+Stopping/Frozen/Fault/Reacquire early 禁止更新
+```
+
+目标：
+
+```text
+降低 multi_rate 的 frequency_rmse_hz
+降低 frequency_adaptation_time_mean_s / combined_adaptation_time_mean_s
+不破坏 steady/freq_ramp/amp_ramp/stop_go/abrupt_stop
+```
+
+#### 第二版：小幅 anchor phase correction
+
+仅当第一版后频率改善但相位指标仍差时执行：
+
+```text
+加入 anchor_phase_gain
+限制单次 phase correction 不超过 5°~10°
+监控 torque_rate_p95_nm_s 和 max_torque_rate_nm_s
+```
+
+#### 第三版：高层 stride memory
+
+如果后续要更接近论文 gait-based AO，可再加入：
+
+```text
+上一 stride 周期
+上一 stride 幅值
+上一 stride 相位偏移
+上一 stride 左右对称性
+新 stride 初期的低层 AO 初始化
+```
+
+这不是当前 V2.1 的优先项。
+
+### 新增评测 / 日志 TODO
+
+已有指标：
+
+- `frequency_transition_count`
+- `frequency_adaptation_time_mean_s` / `frequency_adaptation_time_max_s`
+- `phase_adaptation_time_mean_s` / `phase_adaptation_time_max_s`
+- `combined_adaptation_time_mean_s` / `combined_adaptation_time_max_s`
+- `frequency_transition_windows`
+
+后续实现 anchor 更新时，还应在 runtime CSV / metrics 中补充：
+
+| 指标 | 作用 |
+| --- | --- |
+| `anchor_update_count` | 实际执行高层频率更新的次数 |
+| `rejected_anchor_count` | 被可靠性/状态门控拒绝的 anchor 次数 |
+| `anchor_frequency_error_hz` | anchor 估计频率与离线参考频率的差 |
+| `omega_jump_p95_hz` | 检查频率状态是否跳变过大 |
+| `false_anchor_during_stop_count` | 检查停步段是否误触发 anchor |
+| `phase_correction_deg_p95` | 若启用相位校正，监控相位跳变 |
+
+其中 `false_anchor_during_stop_count = 0` 是 `stop_go` / `noisy_stop_go` 的关键验收项。
+
+### 验收标准
+
+`multi_rate` 应改善：
+
+- `frequency_rmse_hz` 下降；
+- `phase_rmse_percent` 下降或至少不恶化；
+- `phase_abs_error_p95_percent` 下降或至少不恶化；
+- `frequency_adaptation_time_mean_s` 下降；
+- `combined_adaptation_time_mean_s` 下降；
+- `torque_rate_p95_nm_s` 和 `max_torque_rate_nm_s` 不超过阈值。
 
 不应破坏：
 
@@ -258,33 +575,30 @@ struct PhaseConfig {
 - `stop_go`；
 - `abrupt_stop`。
 
-### 风险
+停步/噪声相关验收：
 
-- 噪声可能制造假 anchor，导致频率被错误快速更新；
-- 频率融合增益过大可能让 AO 抖动；
-- 对 `noisy_stop_go` 这类曲线，可能需要先增强峰/谷事件检测的抗噪性。
+- `false_anchor_during_stop_count = 0`；
+- `stop_go` 不出现停步段误助力；
+- `noisy_stop_go` 若仍 FAIL，至少不能因 anchor update 进一步恶化，应检查 `rejected_anchor_count` 是否足够高、`anchor_update_count` 是否被状态门控限制。
 
-### TODO
+### 风险与处理
 
-- [ ] 在 `PhaseConfig` 中加入 anchor-based frequency update 参数：
-  - `anchor_frequency_gain`
-  - `anchor_frequency_min_hz`
-  - `anchor_frequency_max_hz`
-- [ ] 在 `PhaseEstimator` 中保存上一可靠 anchor 的时间和类型。
-- [ ] 在检测到新可靠 anchor 时，用 anchor 间隔估算 stride frequency。
-- [ ] 将估算频率融合进低层 AO 的 `oscillator_.omega`。
-- [ ] 确保 `Stopping` / `Frozen` 期间不更新该高层频率。
-- [ ] 增加 C++ 回归测试：频率突变时 `PhaseEstimator` 能更快更新频率。
-- [ ] 重跑离线曲线：
-  - `steady_0p8`
-  - `freq_ramp`
-  - `amp_ramp`
-  - `stop_go`
-  - `abrupt_stop`
-  - `multi_rate`
-  - `repeated_stop_go`
-- [ ] 若 `noisy_stop_go` 变差，增加 anchor 过零滞回 / 最小显著性 / 事件确认机制。
+- 噪声可能制造假 anchor，导致频率被错误快速更新：用 confidence、refractory、速度换向、interval gate 和状态门控抑制；
+- 频率融合增益过大可能让 AO 抖动：先用 `anchor_frequency_gain = 0.30 ~ 0.35`，并启用 ratio/step/rate limit；
+- 起步重捕获可能被误认为步频突变：Reacquire 初期至少等待 2 个可靠 anchor；
+- 仅校正频率可能无法完全消除相位误差：先验证 frequency 指标，必要时第二版再小幅 phase correction；
+- 直接写 `oscillator_.omega` 可能放大力矩变化率：通过 `omega_target` 和 `max_omega_rate_rad_s2` 限速更新。
 
 ### 当前结论
 
-该方向适合当前 V2 的 `multi_rate` 问题。它不是单纯调参，而是给单层 AO 增加一个“高层 stride 参数学习/快速频率重估”机制，属于论文双层 AO 思路的轻量工程化版本。
+这个方向值得做，是当前 V2 里最合适的 AO 升级路径之一。但 V2.1 应避免“直接高增益更新 omega”，改成：
+
+```text
+可靠 anchor
++ confidence
++ 频率 min/max、ratio、step、rate limit
++ 状态门控
++ 第一版只校正频率
+```
+
+先证明 `multi_rate` 的频率重锁变快且常规曲线不退化，再决定是否进入小幅相位校正和更完整的 stride memory。
