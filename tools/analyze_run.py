@@ -24,6 +24,9 @@ DEFAULT_EVALUATION_THRESHOLDS: Dict[str, float] = {
     "phase_rmse_percent": 5.0,
     "phase_abs_error_p95_percent": 10.0,
     "frequency_rmse_hz": 0.10,
+    "frequency_adaptation_time_mean_s": 1.0,
+    "phase_adaptation_time_mean_s": 1.0,
+    "combined_adaptation_time_mean_s": 1.0,
     "ao_reconstruction_rmse_rad": 0.20,
     "convergence_time_s_at_5_percent": 4.0,
     "max_abs_torque_nm": 8.0,
@@ -164,6 +167,9 @@ def evaluate_metrics(metrics: Dict[str, object], thresholds: Optional[Dict[str, 
         _make_check(metrics, "phase_rmse_percent", "相位 RMSE", "<=", limits["phase_rmse_percent"], "% gait"),
         _make_check(metrics, "phase_abs_error_p95_percent", "相位误差 P95", "<=", limits["phase_abs_error_p95_percent"], "% gait"),
         _make_check(metrics, "frequency_rmse_hz", "频率 RMSE", "<=", limits["frequency_rmse_hz"], "Hz"),
+        _make_check(metrics, "frequency_adaptation_time_mean_s", "频率突变后频率重锁均值", "<=", limits["frequency_adaptation_time_mean_s"], "s", required=False),
+        _make_check(metrics, "phase_adaptation_time_mean_s", "频率突变后相位重锁均值", "<=", limits["phase_adaptation_time_mean_s"], "s", required=False),
+        _make_check(metrics, "combined_adaptation_time_mean_s", "频率突变后二者重锁均值", "<=", limits["combined_adaptation_time_mean_s"], "s", required=False),
         _make_check(metrics, "ao_reconstruction_rmse_rad", "AO 重构 RMSE", "<=", limits["ao_reconstruction_rmse_rad"], "rad", required=False),
         _make_check(metrics, "convergence_time_s_at_5_percent", "5% 相位误差收敛时间", "<=", limits["convergence_time_s_at_5_percent"], "s", required=False),
     ]
@@ -280,6 +286,127 @@ def contiguous_gait_segments(rows: Sequence[Dict[str, str]]) -> List[Tuple[int, 
     if start is not None and len(rows) - start >= 2:
         segments.append((start, len(rows)))
     return segments
+
+
+def _mean_or_none(values: Sequence[float]) -> Optional[float]:
+    return None if not values else mean(values)
+
+
+def adaptation_transition_metrics(
+    rows: Sequence[Dict[str, str]],
+    ref_phase: Sequence[Optional[float]],
+    ref_freq: Sequence[Optional[float]],
+    transition_threshold_hz: float = 0.20,
+    frequency_error_threshold_hz: float = 0.10,
+    phase_error_threshold_percent: float = 5.0,
+    min_transition_gap_s: float = 1.00,
+    reference_frequency_min_hz: float = 0.35,
+    reference_frequency_max_hz: float = 2.00,
+) -> Dict[str, object]:
+    """Measure how quickly AO re-locks after reference frequency steps.
+
+    The metric intentionally uses the same walking-only row gate as the global
+    phase/frequency metrics, so Stopping/Frozen residual samples do not look like
+    slow cadence adaptation. A transition is detected from the reference
+    frequency, and adaptation time is the first time after that transition where
+    the corresponding AO error is back under its threshold.
+    """
+    samples: List[Dict[str, float]] = []
+    for row, phase_ref, freq_ref in zip(rows, ref_phase, ref_freq):
+        if phase_ref is None or freq_ref is None or not is_gait_torque_row(row):
+            continue
+        if not (reference_frequency_min_hz <= freq_ref <= reference_frequency_max_hz):
+            continue
+        samples.append(
+            {
+                "time_s": fnum(row, "MonoTimeS"),
+                "ref_freq_hz": freq_ref,
+                "frequency_error_hz": abs(fnum(row, "Frequency") - freq_ref),
+                "phase_error_percent": abs(wrap_to_pi(fnum(row, "Phase") - phase_ref)) / TAU * 100.0,
+            }
+        )
+
+    windows: List[Dict[str, object]] = []
+    if len(samples) < 2:
+        return {
+            "frequency_transition_count": 0,
+            "frequency_adaptation_time_mean_s": None,
+            "frequency_adaptation_time_max_s": None,
+            "phase_adaptation_time_mean_s": None,
+            "phase_adaptation_time_max_s": None,
+            "combined_adaptation_time_mean_s": None,
+            "combined_adaptation_time_max_s": None,
+            "frequency_transition_windows": windows,
+        }
+
+    previous_freq = samples[0]["ref_freq_hz"]
+    last_transition_time = -float("inf")
+    for i in range(1, len(samples)):
+        current = samples[i]
+        current_freq = current["ref_freq_hz"]
+        if abs(current_freq - previous_freq) < transition_threshold_hz:
+            previous_freq = current_freq
+            continue
+        if current["time_s"] - last_transition_time < min_transition_gap_s:
+            if windows:
+                windows[-1]["to_frequency_hz"] = current_freq
+                windows[-1]["frequency_delta_hz"] = current_freq - float(windows[-1]["from_frequency_hz"])
+            previous_freq = current_freq
+            continue
+
+        transition_time = current["time_s"]
+        freq_relock_time: Optional[float] = None
+        phase_relock_time: Optional[float] = None
+        seen_frequency_error = False
+        seen_phase_error = False
+        for sample in samples[i:]:
+            elapsed = sample["time_s"] - transition_time
+            seen_frequency_error = seen_frequency_error or sample["frequency_error_hz"] > frequency_error_threshold_hz
+            seen_phase_error = seen_phase_error or sample["phase_error_percent"] > phase_error_threshold_percent
+            if freq_relock_time is None and seen_frequency_error and sample["frequency_error_hz"] <= frequency_error_threshold_hz:
+                freq_relock_time = max(0.0, elapsed)
+            if phase_relock_time is None and seen_phase_error and sample["phase_error_percent"] <= phase_error_threshold_percent:
+                phase_relock_time = max(0.0, elapsed)
+            if freq_relock_time is not None and phase_relock_time is not None:
+                break
+        if freq_relock_time is None and not seen_frequency_error:
+            freq_relock_time = 0.0
+        if phase_relock_time is None and not seen_phase_error:
+            phase_relock_time = 0.0
+
+        combined_time: Optional[float] = None
+        if freq_relock_time is not None and phase_relock_time is not None:
+            combined_time = max(freq_relock_time, phase_relock_time)
+
+        windows.append(
+            {
+                "transition_time_s": transition_time,
+                "from_frequency_hz": previous_freq,
+                "to_frequency_hz": current_freq,
+                "frequency_delta_hz": current_freq - previous_freq,
+                "frequency_adaptation_time_s": freq_relock_time,
+                "phase_adaptation_time_s": phase_relock_time,
+                "combined_adaptation_time_s": combined_time,
+                "frequency_error_threshold_hz": frequency_error_threshold_hz,
+                "phase_error_threshold_percent": phase_error_threshold_percent,
+            }
+        )
+        last_transition_time = transition_time
+        previous_freq = current_freq
+
+    freq_times = [float(w["frequency_adaptation_time_s"]) for w in windows if w["frequency_adaptation_time_s"] is not None]
+    phase_times = [float(w["phase_adaptation_time_s"]) for w in windows if w["phase_adaptation_time_s"] is not None]
+    combined_times = [float(w["combined_adaptation_time_s"]) for w in windows if w["combined_adaptation_time_s"] is not None]
+    return {
+        "frequency_transition_count": len(windows),
+        "frequency_adaptation_time_mean_s": _mean_or_none(freq_times),
+        "frequency_adaptation_time_max_s": None if not freq_times else max(freq_times),
+        "phase_adaptation_time_mean_s": _mean_or_none(phase_times),
+        "phase_adaptation_time_max_s": None if not phase_times else max(phase_times),
+        "combined_adaptation_time_mean_s": _mean_or_none(combined_times),
+        "combined_adaptation_time_max_s": None if not combined_times else max(combined_times),
+        "frequency_transition_windows": windows,
+    }
 
 
 def interpolate_reference_for_gait_segments(rows: Sequence[Dict[str, str]], peak_min_spread_deg: float) -> Tuple[List[Optional[float]], List[Optional[float]], List[Tuple[float, float, str]]]:
@@ -411,6 +538,7 @@ def compute_metrics(rows: Sequence[Dict[str, str]], peak_min_spread_deg: float =
                 convergence_time_s = t - valid_pairs[0][0]
                 break
 
+    transition_metrics = adaptation_transition_metrics(rows, ref_phase, ref_freq)
     metrics: Dict[str, object] = {
         "sample_count": len(rows),
         "duration_s": duration,
@@ -440,6 +568,7 @@ def compute_metrics(rows: Sequence[Dict[str, str]], peak_min_spread_deg: float =
         "right_peak_torque_phase_mae_deg": None if not right_peak_errors else mean(right_peak_errors),
         "peak_torque_phase_mae_deg": None if not peak_errors else mean(peak_errors),
     }
+    metrics.update(transition_metrics)
     return metrics, ref_phase, ref_freq, events
 
 
@@ -620,6 +749,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--phase-rmse-threshold-percent", type=float, default=None, help="Maximum phase RMSE in percent of gait cycle")
     parser.add_argument("--phase-p95-threshold-percent", type=float, default=None, help="Maximum phase P95 absolute error in percent of gait cycle")
     parser.add_argument("--frequency-rmse-threshold-hz", type=float, default=None, help="Maximum frequency RMSE in Hz")
+    parser.add_argument("--frequency-adaptation-threshold-s", type=float, default=None, help="Maximum mean frequency relock time after cadence steps")
+    parser.add_argument("--phase-adaptation-threshold-s", type=float, default=None, help="Maximum mean phase relock time after cadence steps")
+    parser.add_argument("--combined-adaptation-threshold-s", type=float, default=None, help="Maximum mean combined phase/frequency relock time after cadence steps")
     parser.add_argument("--max-torque-nm", type=float, default=None, help="Maximum allowed absolute commanded torque in Nm")
     parser.add_argument("--max-torque-rate-nm-s", type=float, default=None, help="Maximum allowed torque rate in Nm/s")
     parser.add_argument("--stationary-false-assist-threshold-s", type=float, default=None, help="Maximum allowed assist duration while stop probability is high")
@@ -632,6 +764,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "phase_rmse_percent": args.phase_rmse_threshold_percent,
         "phase_abs_error_p95_percent": args.phase_p95_threshold_percent,
         "frequency_rmse_hz": args.frequency_rmse_threshold_hz,
+        "frequency_adaptation_time_mean_s": args.frequency_adaptation_threshold_s,
+        "phase_adaptation_time_mean_s": args.phase_adaptation_threshold_s,
+        "combined_adaptation_time_mean_s": args.combined_adaptation_threshold_s,
         "max_abs_torque_nm": args.max_torque_nm,
         "max_torque_rate_nm_s": args.max_torque_rate_nm_s,
         "stationary_false_assist_s": args.stationary_false_assist_threshold_s,
@@ -643,6 +778,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print("Analysis complete")
     print(f"  phase_rmse_percent: {fmt(metrics.get('phase_rmse_percent'), 3)}")
     print(f"  frequency_rmse_hz:  {fmt(metrics.get('frequency_rmse_hz'), 4)}")
+    print(f"  freq_transitions:   {fmt(metrics.get('frequency_transition_count'), 0)}")
+    print(f"  relock_mean_s:      {fmt(metrics.get('combined_adaptation_time_mean_s'), 3)}")
     print(f"  max_abs_torque_nm:  {fmt(metrics.get('max_abs_torque_nm'), 3)}")
     print(f"  evaluation_status:  {result['evaluation']['status']}")
     print(f"  html:               {result['paths']['html']}")

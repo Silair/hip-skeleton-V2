@@ -118,8 +118,16 @@ python3 hs_exoskeleton_v2/tools/analyze_run.py <runtime.csv>
 - `phase_rmse_percent` / `phase_mae_percent`：AO 相位追踪误差。
 - `frequency_rmse_hz`：步频追踪误差。
 - `convergence_time_s_at_5_percent`：进入 5% 相位误差所需时间。
+- `frequency_transition_count`：曲线里检测到的步频阶跃次数。
+- `frequency_adaptation_time_mean_s` / `phase_adaptation_time_mean_s` / `combined_adaptation_time_mean_s`：步频突变后频率、相位、二者同时重新达标的平均耗时；适合比较 `multi_rate` 改进前后。
 - `peak_torque_phase_mae_deg`：助力峰值相位误差。
 - `freeze_torque_violation_count`、`disallow_output_torque_violation_count`：冻结/禁止输出时是否仍有力矩。
 - `stationary_false_assist_s`：停住时误助力时长。
+
+改进前/改进后可用：
+
+```bash
+python3 tools/compare_metrics.py /tmp/before/metrics.json /tmp/after/metrics.json
+```
 
 建议先用 `sine`、`freq_ramp`、`stop_go` 三类曲线跑过，再考虑实机。

@@ -210,5 +210,40 @@ class AnalyzeRunTest(unittest.TestCase):
         self.assertLess(metrics["phase_eval_sample_count"], len(rows))
 
 
+    def test_frequency_transition_adaptation_metrics_report_relock_time(self):
+        analyzer = load_analyzer()
+        rows = []
+        dt = 0.02
+        transition_t = 3.0
+        for i in range(int(7.0 / dt)):
+            t = i * dt
+            ref_freq = 0.6 if t < transition_t else 1.2
+            # Keep the biomechanical signal at the new true frequency after transition,
+            # but simulate AO taking 0.40 s to relock its reported phase/frequency.
+            phase_true = (2.0 * math.pi * (0.6 * min(t, transition_t) + 1.2 * max(0.0, t - transition_t))) % (2.0 * math.pi)
+            adapting = transition_t <= t < transition_t + 0.40
+            measured_freq = 0.75 if adapting else ref_freq
+            measured_phase = (phase_true + (0.35 if adapting else 0.0)) % (2.0 * math.pi)
+            signal = math.sin(phase_true)
+            signed_vel = 2.0 * math.pi * ref_freq * math.cos(phase_true)
+            rows.append({
+                "MonoTimeS": str(t), "DtS": str(dt), "AssistState": "3",
+                "StopProbability": "0.1", "Phase": str(measured_phase), "Frequency": str(measured_freq),
+                "FilteredPhaseSignalRad": str(signal), "SignedPhaseVelocityDegS": str(signed_vel * 57.2957795130823),
+                "SpreadDeg": str(abs(signal) * 57.2957795130823), "AoSignalErrorRad": "0",
+                "FreezeRequested": "0", "AllowOutput": "1", "LeftTorqueCmd": "0", "RightTorqueCmd": "2",
+            })
+
+        metrics, _, _, _ = analyzer.compute_metrics(rows)
+
+        self.assertGreaterEqual(metrics["frequency_transition_count"], 1)
+        self.assertIsNotNone(metrics["frequency_adaptation_time_mean_s"])
+        self.assertGreater(metrics["frequency_adaptation_time_mean_s"], 0.2)
+        self.assertLess(metrics["frequency_adaptation_time_mean_s"], 0.8)
+        self.assertGreater(metrics["phase_adaptation_time_mean_s"], 0.2)
+        self.assertLess(metrics["phase_adaptation_time_mean_s"], 0.8)
+        self.assertTrue(metrics["frequency_transition_windows"])
+
+
 if __name__ == "__main__":
     unittest.main()

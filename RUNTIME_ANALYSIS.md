@@ -52,6 +52,11 @@ python3 hs_exoskeleton_v2/tools/analyze_run.py <runtime.csv> \
 - `frequency_rmse_hz`、`frequency_mae_hz`
 - `ao_reconstruction_rmse_rad`
 - `convergence_time_s_at_5_percent`
+- `frequency_transition_count`：参考步频发生阶跃变化的次数
+- `frequency_adaptation_time_mean_s` / `frequency_adaptation_time_max_s`：步频突变后 AO 频率误差重新低于 `0.10 Hz` 的平均/最大耗时
+- `phase_adaptation_time_mean_s` / `phase_adaptation_time_max_s`：步频突变后 AO 相位误差重新低于 `5% gait cycle` 的平均/最大耗时
+- `combined_adaptation_time_mean_s` / `combined_adaptation_time_max_s`：频率和相位都重新达标所需耗时
+- `frequency_transition_windows`：每次步频突变的时间、前后频率、频率/相位重新锁定耗时明细
 - `max_abs_torque_nm`
 - `max_torque_rate_nm_s`、`torque_rate_p95_nm_s`
 - `freeze_torque_violation_count`
@@ -68,6 +73,7 @@ python3 hs_exoskeleton_v2/tools/analyze_run.py <runtime.csv> \
 steady phase RMSE < 5%
 transition phase RMSE < 8~10%
 frequency RMSE < 0.05~0.10 Hz
+frequency/phase relock after cadence step <= 0.5~1.0 s
 convergence <= 3 gait cycles
 peak torque phase error < 10~15°
 torque never exceeds configured limit
@@ -97,6 +103,9 @@ python3 hs_exoskeleton_v2/tools/analyze_run.py <runtime.csv> \
   --phase-rmse-threshold-percent 5 \
   --phase-p95-threshold-percent 10 \
   --frequency-rmse-threshold-hz 0.10 \
+  --frequency-adaptation-threshold-s 1.0 \
+  --phase-adaptation-threshold-s 1.0 \
+  --combined-adaptation-threshold-s 1.0 \
   --max-torque-nm 8 \
   --max-torque-rate-nm-s 80 \
   --stationary-false-assist-threshold-s 0.5 \
@@ -113,6 +122,34 @@ python3 hs_exoskeleton_v2/tools/analyze_run.py <runtime.csv> --fail-on-evaluatio
 此时评价 `FAIL` 返回 exit 2；CSV 读取/脚本错误仍按普通异常失败。
 
 > 注意：本评价仅用于离线控制日志质量检查。PASS 表示当前日志中的控制指标满足配置阈值，不代表临床安全性、人体实验许可或硬件实际输出验证。参考相位仍来自峰/谷事件构造的近似参考，不等价于外部 ground truth。
+
+## 改进前/改进后对比
+
+针对双层 AO、anchor frequency update 这类“更快适应步频突变”的改动，推荐固定同一条回放曲线，分别保存改动前后的 `metrics.json`，再比较关键指标：
+
+```bash
+python3 hs_exoskeleton_v2/tools/compare_metrics.py \
+  /tmp/before_multi_rate/metrics.json \
+  /tmp/after_multi_rate/metrics.json \
+  --markdown-output /tmp/multi_rate_comparison.md \
+  --json-output /tmp/multi_rate_comparison.json
+```
+
+优先看这些指标是否下降：
+
+- `frequency_adaptation_time_mean_s` / `frequency_adaptation_time_max_s`
+- `phase_adaptation_time_mean_s` / `phase_adaptation_time_max_s`
+- `combined_adaptation_time_mean_s` / `combined_adaptation_time_max_s`
+- `frequency_rmse_hz`
+- `phase_rmse_percent`
+- `phase_abs_error_p95_percent`
+- `max_torque_rate_nm_s`
+
+解释口径：
+
+- 如果 `frequency_rmse_hz` 下降但 `phase_adaptation_time_*` 不降，说明频率估计更准了，但相位还没有更快锁定；
+- 如果 `combined_adaptation_time_*` 下降，同时稳态曲线 `steady_0p8`、`freq_ramp` 不变差，才算真正改善了步频切换适应；
+- 如果 `max_torque_rate_nm_s` 上升明显，说明频率快速融合可能让力矩变化更急，需要降低融合增益或加限斜率。
 
 ## 注意
 
@@ -208,7 +245,10 @@ struct PhaseConfig {
 
 - `multi_rate` 的 `frequency_rmse_hz`；
 - `multi_rate` 的 `phase_rmse_percent` 和 `phase_abs_error_p95_percent`；
-- 步频突变后 AO 的重新锁相时间。
+- 步频突变后 AO 的重新锁相时间：
+  - `frequency_adaptation_time_mean_s`
+  - `phase_adaptation_time_mean_s`
+  - `combined_adaptation_time_mean_s`
 
 不应破坏：
 
