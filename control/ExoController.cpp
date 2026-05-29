@@ -92,7 +92,7 @@ bool ExoController::run() {
 
         // ---------- 意图与冻结：输出 freeze 影响后续相位门控与最终力矩是否允许 ----------
         IntentEstimate intent = intent_detector_.update(features, controller_dt_s);
-        freeze = freeze_manager_.update(intent, controller_dt_s);
+        freeze = stop.stop_requested ? freeze_manager_.resetToLive() : freeze_manager_.update(intent, controller_dt_s);
 
         // ---------- 助力状态机：综合运动置信度、相位有效、锚点、冻结请求与健康 ----------
         AssistInputs assist_inputs{};

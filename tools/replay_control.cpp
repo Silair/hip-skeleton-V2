@@ -333,7 +333,7 @@ int runReplay(const ReplayOptions& options) {
         features.frequency_hz = phase.frequency_hz;
 
         IntentEstimate intent = intent_detector.update(features, controller_dt_s);
-        freeze = freeze_manager.update(intent, controller_dt_s);
+        freeze = stop.stop_requested ? freeze_manager.resetToLive() : freeze_manager.update(intent, controller_dt_s);
 
         AssistInputs assist_inputs{};
         assist_inputs.motion_confidence = intent.motion_confidence;

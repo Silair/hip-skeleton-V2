@@ -28,12 +28,14 @@ public:
     explicit FreezeManager(const FreezeConfig& config);
 
     FreezeDecision update(const IntentEstimate& intent, double dt_s);
+    FreezeDecision resetToLive();
 
 private:
     FreezeConfig config_;
     FreezeState state_ = FreezeState::Live;
     double enter_timer_s_ = 0.0;
     double resume_timer_s_ = 0.0;
+    bool motion_seen_ = false;
 };
 
 } // namespace exo

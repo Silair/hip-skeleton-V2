@@ -95,6 +95,11 @@ void test_freeze_manager_uses_hysteresis() {
     exo::ControlConfig config;
     exo::FreezeManager manager(config.freeze);
 
+    exo::IntentEstimate walk{};
+    walk.motion_confidence = 0.85;
+    walk.stop_probability = 0.10;
+    manager.update(walk, 0.02);
+
     exo::IntentEstimate stop{};
     stop.motion_confidence = 0.05;
     stop.stop_probability = 0.95;
@@ -105,9 +110,6 @@ void test_freeze_manager_uses_hysteresis() {
     }
     assert(decision.freeze_requested);
 
-    exo::IntentEstimate walk{};
-    walk.motion_confidence = 0.85;
-    walk.stop_probability = 0.10;
     for (int i = 0; i < 20; ++i) {
         decision = manager.update(walk, 0.02);
     }
@@ -260,6 +262,53 @@ void test_assist_state_machine_freeze_request_disables_output_immediately() {
     assert(!output.allow_output);
 }
 
+
+
+void test_freeze_manager_does_not_freeze_before_prior_motion() {
+    exo::ControlConfig config;
+    exo::FreezeManager manager(config.freeze);
+
+    exo::IntentEstimate quiet{};
+    quiet.motion_confidence = 0.05;
+    quiet.stop_probability = 0.95;
+
+    exo::FreezeDecision decision{};
+    for (int i = 0; i < 30; ++i) {
+        decision = manager.update(quiet, 0.02);
+    }
+
+    assert(decision.state == exo::FreezeState::Live);
+    assert(!decision.freeze_requested);
+    assert(decision.phase_tracking_enabled);
+}
+
+void test_freeze_manager_reset_to_live_clears_natural_stop_freeze() {
+    exo::ControlConfig config;
+    exo::FreezeManager manager(config.freeze);
+
+    exo::IntentEstimate walk{};
+    walk.motion_confidence = 0.85;
+    walk.stop_probability = 0.10;
+    manager.update(walk, 0.02);
+
+    exo::IntentEstimate stop{};
+    stop.motion_confidence = 0.05;
+    stop.stop_probability = 0.95;
+
+    exo::FreezeDecision decision{};
+    for (int i = 0; i < 20; ++i) {
+        decision = manager.update(stop, 0.02);
+    }
+    assert(decision.freeze_requested);
+
+    decision = manager.resetToLive();
+
+    assert(decision.state == exo::FreezeState::Live);
+    assert(!decision.freeze_requested);
+    assert(decision.phase_tracking_enabled);
+    assert(!decision.recovery_active);
+}
+
 } // namespace
 
 int main() {
@@ -268,6 +317,8 @@ int main() {
     test_torque_profile_is_phase_symmetric();
     test_assist_state_machine_reaches_active_after_warmup();
     test_freeze_manager_uses_hysteresis();
+    test_freeze_manager_does_not_freeze_before_prior_motion();
+    test_freeze_manager_reset_to_live_clears_natural_stop_freeze();
     test_gait_feature_extractor_generates_velocity();
     test_phase_estimator_tracks_signal();
     test_stop_detector_ignores_static_large_spread_and_triggers_on_low_velocity();
