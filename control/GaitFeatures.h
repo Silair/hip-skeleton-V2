@@ -31,6 +31,11 @@ struct PhaseEstimate {
     double ao_signal_error_rad = 0.0;
     bool valid = false;
     bool anchor_detected = false;
+    bool anchor_frequency_updated = false;
+    bool anchor_rejected = false;
+    double anchor_measured_frequency_hz = 0.0;
+    double anchor_confidence = 0.0;
+    double omega_correction_hz = 0.0;
 };
 
 } // namespace exo

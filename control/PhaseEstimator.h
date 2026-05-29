@@ -1,10 +1,10 @@
-// 用 MultiHarmonicAO 跟踪滤波后的步态信号，输出连续相位；在步态峰值处做锚点修正。
-// tracking_enabled 为 false（如冻结）时可衰减相位偏移，避免错误漂移。
+// 用 MultiHarmonicAO 跟踪滤波后的步态信号，输出连续相位；可靠步态 anchor 离散校正 AO 频率。
 
 #pragma once
 
 #include "MultiHarmonicAO.h"
 #include "config/ControlConfig.h"
+#include "control/AssistStateMachine.h"
 
 namespace exo {
 
@@ -15,17 +15,38 @@ class PhaseEstimator {
 public:
     explicit PhaseEstimator(const PhaseConfig& config);
 
-    PhaseEstimate update(const GaitFeatures& features, double dt_s, bool tracking_enabled);
+    PhaseEstimate update(const GaitFeatures& features,
+                         double dt_s,
+                         bool tracking_enabled,
+                         AssistState assist_state,
+                         double stop_probability = 0.0);
 
 private:
+    enum class AnchorType {
+        Peak,
+        Valley,
+    };
+
     static double wrapAngle(double angle_rad);
+    static double clamp01(double value);
+    static double moveToward(double current, double target, double max_step);
+    static double anchorFrequencyGainForState(const PhaseConfig& config, AssistState assist_state);
+
+    void applyRateLimitedOmega(double dt_s);
+    void clampOmegaToConfigLimits();
 
     PhaseConfig config_;
     MultiHarmonicAO oscillator_;
     double last_signal_rad_ = 0.0;
     double last_phase_velocity_deg_s_ = 0.0;
     double last_anchor_time_s_ = -10.0;
-    double phase_offset_rad_ = 0.0;
+    double last_frequency_anchor_time_s_ = -10.0;
+    AnchorType last_frequency_anchor_type_ = AnchorType::Peak;
+    bool has_frequency_anchor_ = false;
+    int reliable_anchor_count_since_tracking_enable_ = 0;
+    bool previous_tracking_enabled_ = true;
+    double omega_target_rad_s_ = 0.0;
+    bool omega_target_tracking_active_ = false;
     double now_s_ = 0.0;
 };
 

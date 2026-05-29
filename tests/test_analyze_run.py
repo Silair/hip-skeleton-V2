@@ -244,6 +244,34 @@ class AnalyzeRunTest(unittest.TestCase):
         self.assertLess(metrics["phase_adaptation_time_mean_s"], 0.8)
         self.assertTrue(metrics["frequency_transition_windows"])
 
+    def test_anchor_update_metrics_count_runtime_fields(self):
+        analyzer = load_analyzer()
+        rows = [
+            {
+                "MonoTimeS": "0.00", "DtS": "0.02", "AssistState": "3", "StopProbability": "0.1",
+                "Phase": "0", "Frequency": "0.8", "FilteredPhaseSignalRad": "0",
+                "SignedPhaseVelocityDegS": "20", "SpreadDeg": "20", "AoSignalErrorRad": "0",
+                "FreezeRequested": "0", "AllowOutput": "1", "LeftTorqueCmd": "0", "RightTorqueCmd": "0",
+                "AnchorFrequencyUpdated": "1", "AnchorRejected": "0",
+                "AnchorMeasuredFrequencyHz": "0.9", "OmegaCorrectionHz": "0.10",
+            },
+            {
+                "MonoTimeS": "0.02", "DtS": "0.02", "AssistState": "4", "StopProbability": "0.95",
+                "Phase": "0", "Frequency": "0.8", "FilteredPhaseSignalRad": "0",
+                "SignedPhaseVelocityDegS": "-20", "SpreadDeg": "20", "AoSignalErrorRad": "0",
+                "FreezeRequested": "0", "AllowOutput": "1", "LeftTorqueCmd": "0", "RightTorqueCmd": "0",
+                "AnchorFrequencyUpdated": "0", "AnchorRejected": "1",
+                "AnchorMeasuredFrequencyHz": "0.0", "OmegaCorrectionHz": "0.00",
+            },
+        ]
+
+        metrics, _, _, _ = analyzer.compute_metrics(rows)
+
+        self.assertEqual(metrics["anchor_update_count"], 1)
+        self.assertEqual(metrics["rejected_anchor_count"], 1)
+        self.assertEqual(metrics["false_anchor_during_stop_count"], 1)
+        self.assertAlmostEqual(metrics["omega_jump_p95_hz"], 0.10)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -526,6 +526,29 @@ def compute_metrics(rows: Sequence[Dict[str, str]], peak_min_spread_deg: float =
 
     left_peak_errors, right_peak_errors = local_peak_phase_errors(rows, lead_angle_rad)
     peak_errors = left_peak_errors + right_peak_errors
+    anchor_detected_count = sum(1 for row in rows if fnum(row, "AnchorDetected", 0.0) >= 0.5)
+    anchor_update_count = sum(1 for row in rows if fnum(row, "AnchorFrequencyUpdated", 0.0) >= 0.5)
+    rejected_anchor_count = sum(1 for row in rows if fnum(row, "AnchorRejected", 0.0) >= 0.5)
+    anchor_confidences = [
+        fnum(row, "AnchorConfidence", 0.0)
+        for row in rows
+        if fnum(row, "AnchorFrequencyUpdated", 0.0) >= 0.5 and row.get("AnchorConfidence", "") != ""
+    ]
+    false_anchor_during_stop_count = sum(
+        1
+        for row in rows
+        if (
+            fnum(row, "AnchorFrequencyUpdated", 0.0) >= 0.5
+            or fnum(row, "AnchorRejected", 0.0) >= 0.5
+            or fnum(row, "AnchorDetected", 0.0) >= 0.5
+        )
+        and (int(fnum(row, "AssistState", -1.0)) == 4 or fnum(row, "StopProbability", 0.0) >= 0.8)
+    )
+    omega_corrections = [
+        abs(fnum(row, "OmegaCorrectionHz", 0.0))
+        for row in rows
+        if row.get("OmegaCorrectionHz", "") != "" and fnum(row, "AnchorFrequencyUpdated", 0.0) >= 0.5
+    ]
     duration = 0.0
     if rows:
         duration = max(0.0, fnum(rows[-1], "MonoTimeS") - fnum(rows[0], "MonoTimeS"))
@@ -567,6 +590,14 @@ def compute_metrics(rows: Sequence[Dict[str, str]], peak_min_spread_deg: float =
         "left_peak_torque_phase_mae_deg": None if not left_peak_errors else mean(left_peak_errors),
         "right_peak_torque_phase_mae_deg": None if not right_peak_errors else mean(right_peak_errors),
         "peak_torque_phase_mae_deg": None if not peak_errors else mean(peak_errors),
+        "anchor_detected_count": anchor_detected_count,
+        "anchor_update_count": anchor_update_count,
+        "rejected_anchor_count": rejected_anchor_count,
+        "anchor_confidence_mean": None if not anchor_confidences else mean(anchor_confidences),
+        "anchor_confidence_p95": percentile(anchor_confidences, 95.0),
+        "false_anchor_during_stop_count": false_anchor_during_stop_count,
+        "omega_jump_p95_hz": percentile(omega_corrections, 95.0),
+        "omega_jump_max_hz": max(omega_corrections) if omega_corrections else None,
     }
     metrics.update(transition_metrics)
     return metrics, ref_phase, ref_freq, events

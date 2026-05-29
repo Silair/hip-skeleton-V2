@@ -38,6 +38,8 @@ private:
     TorqueProfile torque_profile_;
     StopTorqueLimiter stop_torque_limiter_;
     TorqueCommand previous_torque_{};
+    AssistState last_assist_state_ = AssistState::Transparent;
+    double last_stop_probability_ = 0.0;
     Clock clock_;
 };
 

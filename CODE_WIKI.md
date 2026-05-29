@@ -26,7 +26,7 @@ V2 的程序入口是 `app/main.cpp`，主编排器是 `control/ExoController.cp
 
 - `control/ExoController.h/.cpp`：V2 主控制器；固定频率循环里串联所有控制子模块。
 - `control/GaitFeatureExtractor.h/.cpp`：从左右关节角提取滤波步态信号、开合幅度、相位速度。
-- `control/PhaseEstimator.h/.cpp`：使用旧版 `MultiHarmonicAO` 估计相位、频率、幅值，并在峰/谷锚点处修正相位偏移。
+- `control/PhaseEstimator.h/.cpp`：使用旧版 `MultiHarmonicAO` 估计相位、频率、幅值；V2.1 在可靠峰/谷 anchor 处做置信度加权的频率校正（不校正相位）。
 - `control/IntentDetector.h/.cpp`：把 spread、velocity、amplitude、frequency 归一化加权为运动置信度，停止概率为其补。
 - `control/FreezeManager.h/.cpp`：Live/Frozen/Recovery 三态滞回，输出冻结请求、相位跟踪门控和恢复状态。
 - `control/AssistStateMachine.h/.cpp`：Transparent/Tracking/Ramp/Active/Frozen/Fault 助力门控状态机。
@@ -132,18 +132,18 @@ app/main.cpp
 
 ### 5.5 相位估计：`control/PhaseEstimator.h/.cpp`
 
-输入：`GaitFeatures`、dt、`tracking_enabled`。
+输入：`GaitFeatures`、dt、`tracking_enabled`、**上一帧** `AssistState`（因相位更新在助力状态机之前执行）。
 
 处理：
 
 - 复用旧版 `MultiHarmonicAO`，构造时初始化为 `PhaseConfig::ao_initial_frequency_hz`。
-- tracking 开启时把本周期输入分小步喂给 AO，并将频率夹在配置范围内。
-- 通过相位速度符号变化检测正/负峰值，满足 spread 和 anchor 间隔条件时更新 `phase_offset_rad_`。
-- tracking 关闭时衰减相位偏移，降低冻结期间漂移风险。
+- tracking 开启时把本周期输入分小步喂给 AO，并将频率夹在 `ao_min/max_frequency_hz` 范围内。
+- 用 `signed_phase_velocity_deg_s` 的符号换向 + `anchor_min_velocity_deg_s` + `spread_deg` 检测可靠 Peak/Valley anchor。
+- 异类相邻 anchor 估计半周期频率，经 confidence、绝对/相对/step 限幅后，按 `effective_gain = anchor_frequency_gain(_ramp) * confidence` 融合到目标频率，并以 `max_omega_rate_rad_s2` 限速写回 `oscillator_.omega`。
+- `AssistState::Active`/`Ramp` 允许频率更新；`Tracking` 只累计 anchor；`Stopping`/`Frozen`/`Transparent`/`Fault` 禁止；`tracking_enabled` 关闭时重置 anchor 状态机。
+- V2.1 不做锚点相位校正（`anchor_phase_gain = 0`）；输出相位为 `wrapAngle(phi_GP)`。
 
-输出：`PhaseEstimate`，包含 `phase_rad`、`frequency_hz`、`amplitude_rad`、`valid`、`anchor_detected`。
-
-注意：当前代码使用 `features.phase_velocity_deg_s` 的绝对值来做正/负峰符号变化判断；由于特征提取中速度为绝对值，负峰检测语义可能与旧版 `diff_vel` 有差异，属于待实测确认点。
+输出：`PhaseEstimate`，含 `phase_rad`、`frequency_hz`、`amplitude_rad`、`valid`、`anchor_detected`，以及 `anchor_frequency_updated`、`anchor_rejected`、`anchor_confidence`、`omega_correction_hz` 等调试字段。
 
 ### 5.6 意图检测：`control/IntentDetector.h/.cpp`
 

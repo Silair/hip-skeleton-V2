@@ -1,0 +1,195 @@
+{
+  "status": "MIXED",
+  "comparable_metric_count": 15,
+  "improved_metric_count": 10,
+  "worsened_metric_count": 4,
+  "metrics": [
+    {
+      "key": "phase_rmse_percent",
+      "label": "Phase RMSE",
+      "unit": "% gait",
+      "direction": "lower_is_better",
+      "before": 9.95034313834019,
+      "after": 11.569317620723938,
+      "delta": 1.6189744823837486,
+      "relative_change_percent": 16.270539215332114,
+      "verdict": "WORSE"
+    },
+    {
+      "key": "phase_abs_error_p95_percent",
+      "label": "Phase error P95",
+      "unit": "% gait",
+      "direction": "lower_is_better",
+      "before": 24.709254282020943,
+      "after": 28.34194292322693,
+      "delta": 3.632688641205988,
+      "relative_change_percent": 14.70173320385966,
+      "verdict": "WORSE"
+    },
+    {
+      "key": "frequency_rmse_hz",
+      "label": "Frequency RMSE",
+      "unit": "Hz",
+      "direction": "lower_is_better",
+      "before": 0.25315447628583276,
+      "after": 0.2062548063967676,
+      "delta": -0.04689966988906516,
+      "relative_change_percent": -18.526107291151146,
+      "verdict": "IMPROVED"
+    },
+    {
+      "key": "frequency_mae_hz",
+      "label": "Frequency MAE",
+      "unit": "Hz",
+      "direction": "lower_is_better",
+      "before": 0.17687843647404355,
+      "after": 0.14135448868095454,
+      "delta": -0.03552394779308901,
+      "relative_change_percent": -20.083820561305142,
+      "verdict": "IMPROVED"
+    },
+    {
+      "key": "frequency_adaptation_time_mean_s",
+      "label": "Frequency relock mean",
+      "unit": "s",
+      "direction": "lower_is_better",
+      "before": 1.7300000000000004,
+      "after": 1.273333333333334,
+      "delta": -0.45666666666666633,
+      "relative_change_percent": -26.39691714836221,
+      "verdict": "IMPROVED"
+    },
+    {
+      "key": "frequency_adaptation_time_max_s",
+      "label": "Frequency relock max",
+      "unit": "s",
+      "direction": "lower_is_better",
+      "before": 3.0,
+      "after": 1.3800000000000008,
+      "delta": -1.6199999999999992,
+      "relative_change_percent": -53.99999999999997,
+      "verdict": "IMPROVED"
+    },
+    {
+      "key": "phase_adaptation_time_mean_s",
+      "label": "Phase relock mean",
+      "unit": "s",
+      "direction": "lower_is_better",
+      "before": 0.7350000000000012,
+      "after": 1.406666666666668,
+      "delta": 0.6716666666666669,
+      "relative_change_percent": 91.3832199546484,
+      "verdict": "WORSE"
+    },
+    {
+      "key": "phase_adaptation_time_max_s",
+      "label": "Phase relock max",
+      "unit": "s",
+      "direction": "lower_is_better",
+      "before": 0.9800000000000004,
+      "after": 1.620000000000001,
+      "delta": 0.6400000000000006,
+      "relative_change_percent": 65.30612244897962,
+      "verdict": "WORSE"
+    },
+    {
+      "key": "combined_adaptation_time_mean_s",
+      "label": "Combined relock mean",
+      "unit": "s",
+      "direction": "lower_is_better",
+      "before": 1.7300000000000004,
+      "after": 1.406666666666668,
+      "delta": -0.32333333333333236,
+      "relative_change_percent": -18.689788053949844,
+      "verdict": "IMPROVED"
+    },
+    {
+      "key": "combined_adaptation_time_max_s",
+      "label": "Combined relock max",
+      "unit": "s",
+      "direction": "lower_is_better",
+      "before": 3.0,
+      "after": 1.620000000000001,
+      "delta": -1.379999999999999,
+      "relative_change_percent": -45.99999999999997,
+      "verdict": "IMPROVED"
+    },
+    {
+      "key": "max_torque_rate_nm_s",
+      "label": "Max torque rate",
+      "unit": "Nm/s",
+      "direction": "lower_is_better",
+      "before": 87.5799499999863,
+      "after": 64.02800000000136,
+      "delta": -23.55194999998494,
+      "relative_change_percent": -26.89194273345512,
+      "verdict": "IMPROVED"
+    },
+    {
+      "key": "torque_rate_p95_nm_s",
+      "label": "Torque rate P95",
+      "unit": "Nm/s",
+      "direction": "lower_is_better",
+      "before": 41.399220000000874,
+      "after": 38.80875000000082,
+      "delta": -2.590470000000053,
+      "relative_change_percent": -6.257291804048479,
+      "verdict": "IMPROVED"
+    },
+    {
+      "key": "peak_torque_phase_mae_deg",
+      "label": "Peak torque phase MAE",
+      "unit": "deg",
+      "direction": "lower_is_better",
+      "before": 7.405045023763371,
+      "after": 3.560987367346777,
+      "delta": -3.8440576564165942,
+      "relative_change_percent": -51.91133401729107,
+      "verdict": "IMPROVED"
+    },
+    {
+      "key": "omega_jump_p95_hz",
+      "label": "Omega jump P95",
+      "unit": "Hz",
+      "direction": "lower_is_better",
+      "before": null,
+      "after": 0.0254648,
+      "delta": null,
+      "relative_change_percent": null,
+      "verdict": "SKIP"
+    },
+    {
+      "key": "omega_jump_max_hz",
+      "label": "Omega jump max",
+      "unit": "Hz",
+      "direction": "lower_is_better",
+      "before": null,
+      "after": 0.0254648,
+      "delta": null,
+      "relative_change_percent": null,
+      "verdict": "SKIP"
+    },
+    {
+      "key": "false_anchor_during_stop_count",
+      "label": "False anchor during stop",
+      "unit": "count",
+      "direction": "lower_is_better",
+      "before": 0.0,
+      "after": 0.0,
+      "delta": 0.0,
+      "relative_change_percent": null,
+      "verdict": "UNCHANGED"
+    },
+    {
+      "key": "anchor_update_count",
+      "label": "Anchor updates",
+      "unit": "count",
+      "direction": "neutral",
+      "before": 0.0,
+      "after": 15.0,
+      "delta": 15.0,
+      "relative_change_percent": null,
+      "verdict": "IMPROVED"
+    }
+  ]
+}

@@ -162,9 +162,83 @@ python3 hs_exoskeleton_v2/tools/compare_metrics.py \
 如果还没有实机 runtime CSV，可以先使用 `OFFLINE_REPLAY.md` 中的曲线生成器和 `hs_exoskeleton_v2_replay` 离线生成同结构日志，再运行本分析脚本。这样可以在上实机前检查 AO 相位误差、频率追踪、助力峰值相位、冻结/禁止输出违规等指标。
 
 
-## TODO：V2.1 Anchor-based Gait AO Frequency Correction
+## V2.1 Anchor-based Gait AO Frequency Correction（已实现）
 
-### 定位
+实现位置：`control/PhaseEstimator.cpp`、`config/ControlConfig.h`（`PhaseConfig` anchor 字段）、`logging/ExoLogger.cpp`（Anchor* 列）、`tools/analyze_run.py`（anchor 指标）。
+
+实现要点（第一版）：
+
+- **不是**完整复刻 gait-based AO / two-level AO：高层只做离散 **anchor-based frequency correction**；低层 AO 仍负责连续相位积分；不做 stride template、幅值学习、相位硬校正。
+- 低层 AO 连续积分相位；可靠 Peak/Valley anchor 仅做 **频率** 离散校正（`anchor_phase_gain = 0`，已移除 `phase_offset_rad_`）。
+- 异类相邻 anchor 用 `0.5 / dt_anchor` 估计半周期频率；confidence 加权融合 + min/max、ratio、step。**Anchor 事件只更新 `omega_target`；`oscillator_.omega` 在后续控制周期内按 `max_omega_rate_rad_s2 * dt` 限速追踪目标**（避免在 anchor 瞬间直接写 `omega` 造成突跳）。
+- `PhaseEstimator::update` 使用 **上一帧** `AssistState` 与 `stop_probability`（`>= anchor_update_disable_stop_probability` 时禁止更新，默认 0.65）。
+- 50 Hz anchor：速度过零 + `max(|v_prev|, |v_curr|) >= anchor_min_velocity` + spread/refractory。
+
+离线 HEAD vs V2.1 对比（`tools/benchmark_v21_anchor_batch.sh` + `compare_metrics.py`，2026-05-29）；完整数据与改善分析见 [`artifacts/v21_anchor_ab/V21_ANCHOR_AB_REPORT.md`](artifacts/v21_anchor_ab/V21_ANCHOR_AB_REPORT.md)。
+
+| 曲线 | 主要变化 |
+| --- | --- |
+| `multi_rate` | `frequency_rmse_hz` 0.253→0.208（-18%）；`frequency_adaptation_time_mean_s` 1.73→1.29s；`combined` 改善；`phase_rmse_percent` 9.95→11.60（变差，需继续盯 `peak_torque_phase_mae`） |
+| `stop_go` / `freq_ramp` | `false_anchor_during_stop=0`；频率 RMSE 略降 |
+| `steady_0p8` | `peak_torque_phase_mae` 未单独退化（整体 phase_rmse 略升） |
+
+Anchor 时间线：`python3 tools/analyze_anchor_timeline.py <runtime.csv>` 可按 `multi_rate` 各 4s 段统计 `anchor_update_count`。
+
+V2.2+（未做）：小幅 `anchor_phase_gain`、延迟 1 帧极值确认、stride memory、`anchor_frequency_error_hz`。
+
+### 合入评审结论（V2.1 第一版）
+
+**建议合入。** 定位与边界须写清楚：
+
+```text
+V2.1 主要改善 multi_rate（及类似步频突变）下的频率重锁与力矩峰值相位对齐；
+不承诺全面降低全时段 phase_rmse_percent。
+```
+
+V2.1 Anchor-based Frequency Correction 已完成第一版实现。该版本不是完整 two-level AO，而是在现有 AO 上增加可靠 Peak/Valley anchor 事件层，用于对 `omega_target` 做受限频率校正，并通过每帧 omega rate limit 平滑追踪目标频率。
+
+A/B 结果（`multi_rate`，HEAD → V2.1）：
+
+- `frequency_rmse_hz`：0.253 → 0.206（约 −18%）
+- `frequency_adaptation_time_mean_s`：1.73 s → 1.27 s（约 −26%）
+- `combined_adaptation_time_mean_s`：1.73 s → 1.41 s（约 −19%）
+- `torque_rate_p95_nm_s`：41.4 → 38.8
+- `omega_jump_max_hz`：0.026（频率更新无明显突跳）
+- `false_anchor_during_stop`：0
+- `peak_torque_phase_mae_deg`：7.4° → 3.6°（力矩峰值相位对齐改善）
+
+已知代价：`phase_rmse_percent` 9.95 → 11.57。第一版只做频率校正、不做相位 offset / phase correction，该现象可接受；工程上更应关注 **frequency adaptation** 与 **torque peak timing**，而非单独优化全时段 `phase_rmse`。
+
+合入后 TODO：
+
+1. **诊断 0.6 Hz 低频起步段 anchor 覆盖不足**（`multi_rate` 第一段 `anchor_update_count = 0`）：先加 reject 原因统计，勿在 V2.1 合入前盲目降低 `anchor_min_confidence` 或加大 `anchor_frequency_gain`。
+2. **实机验证** `stop_go` / `repeated_stop_go` / `abrupt_stop`：走走停停恢复、急停软停边界、是否存在误 anchor 或恢复偏慢。
+
+#### 合入前四条曲线核对（离线回放，2026-05-29）
+
+| 曲线 | 核对项 | Before → After | 结论 |
+| --- | --- | --- | --- |
+| `stop_go` | `false_anchor_during_stop` | 0 → 0 | 通过 |
+| | `stationary_false_assist_s` | 0 → 0 | 通过 |
+| | `frequency_rmse_hz` | 0.018 → 0.012 | 改善 |
+| | `torque_rate_p95` | 16.9 → 7.0 | 改善 |
+| | `anchor_update_count` | 0 → 2（Active 段） | 可接受 |
+| `repeated_stop_go` | `false_anchor_during_stop` | 2 → **1** | 待实机确认（离线 1 次需排查） |
+| | `stationary_false_assist_s` | 0 → 0 | 通过 |
+| | `torque_rate_p95` | 8.3 → 3.7 | 改善 |
+| | `anchor_update_count` | 0 → 0 | 无频率更新（门控有效） |
+| `abrupt_stop` | `stationary_false_assist_s` | 0 → 0 | 通过 |
+| | `torque_rate_p95` | 15.4 → 8.8 | 改善 |
+| | `peak_torque_phase_mae_deg` | 14.7 → 17.4 | 离线略差，合入后实机盯 |
+| | `false_anchor_during_stop` | 0 → 0 | 通过 |
+| `steady_0p8` | `phase_rmse_percent` | 1.41 → 2.17 | 略升（已知代价） |
+| | `peak_torque_phase_mae_deg` | 3.00 → 2.75 | 略改善 |
+| | `omega_jump_max_hz` | — → 0.006 | 抖动很小 |
+| | `anchor_update_count` | 0 → 3 | 合理 |
+
+---
+
+### 定位（设计说明）
 
 严格来说，V2.1 不应称为完整“双层 AO”复现。更准确的定位是：
 

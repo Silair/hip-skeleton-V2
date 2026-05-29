@@ -17,6 +17,15 @@
 
 namespace {
 
+void fill_sine_features(exo::GaitFeatures& features, double t_s, double frequency_hz) {
+    const double phase = 2.0 * M_PI * frequency_hz * t_s;
+    features.filtered_phase_signal_rad = std::sin(phase);
+    features.spread_deg = std::abs(features.filtered_phase_signal_rad) * 57.2957795130823;
+    features.signed_phase_velocity_deg_s =
+        2.0 * M_PI * frequency_hz * std::cos(phase) * 57.2957795130823;
+    features.phase_velocity_deg_s = std::abs(features.signed_phase_velocity_deg_s);
+}
+
 void test_intent_detector_prefers_motion_over_stop() {
     exo::ControlConfig config;
     exo::IntentDetector detector(config.intent);
@@ -149,15 +158,96 @@ void test_phase_estimator_tracks_signal() {
     exo::GaitFeatures features{};
 
     for (int i = 0; i < 200; ++i) {
-        const double t = i * 0.02;
-        features.filtered_phase_signal_rad = std::sin(t * 2.0 * M_PI * 0.9);
-        features.spread_deg = std::abs(features.filtered_phase_signal_rad) * 57.2957795130823;
-        features.phase_velocity_deg_s = std::abs(std::cos(t * 2.0 * M_PI * 0.9)) * 57.2957795130823;
-        estimate = estimator.update(features, 0.02, true);
+        fill_sine_features(features, i * 0.02, 0.9);
+        estimate = estimator.update(features, 0.02, true, exo::AssistState::Active);
     }
 
     assert(estimate.valid);
     assert(estimate.frequency_hz > 0.5);
+}
+
+void test_phase_estimator_applies_anchor_frequency_updates_during_active_walking() {
+    exo::ControlConfig config;
+    exo::PhaseEstimator estimator(config.phase);
+    exo::GaitFeatures features{};
+
+    const double dt = 0.02;
+    int anchor_update_count = 0;
+    for (int i = 0; i < 400; ++i) {
+        fill_sine_features(features, i * dt, 0.9);
+        const exo::PhaseEstimate estimate =
+            estimator.update(features, dt, true, exo::AssistState::Active, 0.0);
+        anchor_update_count += estimate.anchor_frequency_updated ? 1 : 0;
+    }
+
+    assert(anchor_update_count >= 3);
+}
+
+void test_phase_estimator_no_anchor_frequency_update_when_stop_probability_high() {
+    exo::ControlConfig config;
+    exo::PhaseEstimator estimator(config.phase);
+    exo::GaitFeatures features{};
+    exo::PhaseEstimate estimate{};
+
+    const double dt = 0.02;
+    for (int i = 0; i < 300; ++i) {
+        fill_sine_features(features, i * dt, 0.9);
+        estimator.update(features, dt, true, exo::AssistState::Active, 0.0);
+    }
+
+    fill_sine_features(features, 300.0 * dt, 0.9);
+    estimate = estimator.update(features, dt, true, exo::AssistState::Active, 0.9);
+    assert(!estimate.anchor_frequency_updated);
+}
+
+void test_phase_estimator_no_anchor_frequency_update_when_stopping() {
+    exo::ControlConfig config;
+    exo::PhaseEstimator estimator(config.phase);
+    exo::GaitFeatures features{};
+    exo::PhaseEstimate estimate{};
+
+    const double dt = 0.02;
+    for (int i = 0; i < 300; ++i) {
+        fill_sine_features(features, i * dt, 0.9);
+        estimator.update(features, dt, true, exo::AssistState::Active);
+    }
+
+    fill_sine_features(features, 300.0 * dt, 0.9);
+    estimate = estimator.update(features, dt, true, exo::AssistState::Stopping);
+    assert(!estimate.anchor_frequency_updated);
+}
+
+void test_phase_estimator_ramp_uses_reduced_gain() {
+    exo::ControlConfig config;
+    exo::GaitFeatures features{};
+
+    const double dt = 0.02;
+    double max_active_correction_hz = 0.0;
+    double max_ramp_correction_hz = 0.0;
+
+    {
+        exo::PhaseEstimator active_estimator(config.phase);
+        for (int i = 0; i < 400; ++i) {
+            fill_sine_features(features, i * dt, 0.9);
+            const exo::PhaseEstimate estimate =
+                active_estimator.update(features, dt, true, exo::AssistState::Active);
+            max_active_correction_hz = std::max(max_active_correction_hz, std::abs(estimate.omega_correction_hz));
+        }
+    }
+
+    {
+        exo::PhaseEstimator ramp_estimator(config.phase);
+        for (int i = 0; i < 400; ++i) {
+            fill_sine_features(features, i * dt, 0.9);
+            const exo::PhaseEstimate estimate =
+                ramp_estimator.update(features, dt, true, exo::AssistState::Ramp);
+            max_ramp_correction_hz = std::max(max_ramp_correction_hz, std::abs(estimate.omega_correction_hz));
+        }
+    }
+
+    assert(max_active_correction_hz > 1e-6);
+    assert(max_ramp_correction_hz > 1e-6);
+    assert(max_ramp_correction_hz < max_active_correction_hz);
 }
 
 
@@ -359,6 +449,10 @@ int main() {
     test_freeze_manager_reset_to_live_clears_natural_stop_freeze();
     test_gait_feature_extractor_generates_velocity();
     test_phase_estimator_tracks_signal();
+    test_phase_estimator_applies_anchor_frequency_updates_during_active_walking();
+    test_phase_estimator_no_anchor_frequency_update_when_stop_probability_high();
+    test_phase_estimator_no_anchor_frequency_update_when_stopping();
+    test_phase_estimator_ramp_uses_reduced_gain();
     test_stop_detector_ignores_static_large_spread_and_triggers_on_low_velocity();
     test_stop_detector_exits_when_joint_velocity_returns();
     test_assist_state_machine_stop_request_uses_stopping_state_with_output_until_scale_reaches_zero();

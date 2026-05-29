@@ -26,7 +26,12 @@ METRIC_SPECS = [
     ("combined_adaptation_time_mean_s", "Combined relock mean", "lower_is_better", "s"),
     ("combined_adaptation_time_max_s", "Combined relock max", "lower_is_better", "s"),
     ("max_torque_rate_nm_s", "Max torque rate", "lower_is_better", "Nm/s"),
+    ("torque_rate_p95_nm_s", "Torque rate P95", "lower_is_better", "Nm/s"),
     ("peak_torque_phase_mae_deg", "Peak torque phase MAE", "lower_is_better", "deg"),
+    ("omega_jump_p95_hz", "Omega jump P95", "lower_is_better", "Hz"),
+    ("omega_jump_max_hz", "Omega jump max", "lower_is_better", "Hz"),
+    ("false_anchor_during_stop_count", "False anchor during stop", "lower_is_better", "count"),
+    ("anchor_update_count", "Anchor updates", "neutral", "count"),
 ]
 
 

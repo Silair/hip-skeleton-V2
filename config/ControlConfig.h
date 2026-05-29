@@ -54,7 +54,7 @@ struct TorqueConfig {
     double max_torque_nm = 8.0;
 };
 
-// 自适应振荡器 AO 的频率范围、低通、峰值锚点条件等（PhaseEstimator / GaitFeatureExtractor）。
+// 自适应振荡器 AO 的频率范围、低通、anchor 频率校正等（PhaseEstimator / GaitFeatureExtractor）。
 struct PhaseConfig {
     double target_frequency_hz = 50.0;
     double ao_initial_frequency_hz = 0.8;
@@ -63,8 +63,27 @@ struct PhaseConfig {
     double low_pass_cutoff_hz = 8.0;
     double peak_min_spread_deg = 18.0;
     double anchor_min_fraction_of_period = 0.40;
-    double anchor_decay_gain = 1.0;
     double ao_internal_step_s = 0.002;
+
+    bool enable_anchor_frequency_update = true;
+    double anchor_frequency_gain = 0.35;
+    double anchor_frequency_gain_ramp = 0.15;
+    double anchor_phase_gain = 0.0;
+    double anchor_frequency_min_hz = 0.45;
+    double anchor_frequency_max_hz = 1.60;
+    double anchor_min_interval_s = 0.18;
+    double anchor_max_interval_s = 1.10;
+    double anchor_min_spread_deg = 4.0;
+    double anchor_min_velocity_deg_s = 8.0;
+    double anchor_refractory_s = 0.12;
+    double anchor_spread_margin_deg = 8.0;
+    double anchor_velocity_reference_deg_s = 60.0;
+    double anchor_min_confidence = 0.55;
+    double anchor_max_frequency_ratio = 1.35;
+    double anchor_max_frequency_step_hz = 0.20;
+    double max_omega_rate_rad_s2 = 8.0;
+    double anchor_update_disable_stop_probability = 0.65;
+    int reacquire_anchor_warmup_count = 2;
 };
 
 // 总控：主循环频率、单次运行时长，以及上面各子配置嵌套结构体。

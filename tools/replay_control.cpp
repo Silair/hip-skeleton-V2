@@ -292,6 +292,8 @@ int runReplay(const ReplayOptions& options) {
 
     FreezeDecision freeze{};
     TorqueCommand previous_torque{};
+    AssistState last_assist_state = AssistState::Transparent;
+    double last_stop_probability = 0.0;
     uint64_t loop_seq = 0;
     double previous_time_s = samples.front().time_s;
     int64_t epoch_ms = 0;
@@ -331,11 +333,13 @@ int runReplay(const ReplayOptions& options) {
         StopDecision stop = stop_detector.update(state, controller_dt_s);
         GaitFeatures features = feature_extractor.update(state, controller_dt_s);
         const bool phase_tracking_enabled = freeze.phase_tracking_enabled && stop.phase_tracking_enabled;
-        PhaseEstimate phase = phase_estimator.update(features, controller_dt_s, phase_tracking_enabled);
+        PhaseEstimate phase = phase_estimator.update(
+            features, controller_dt_s, phase_tracking_enabled, last_assist_state, last_stop_probability);
         features.amplitude_rad = phase.amplitude_rad;
         features.frequency_hz = phase.frequency_hz;
 
         IntentEstimate intent = intent_detector.update(features, controller_dt_s);
+        last_stop_probability = intent.stop_probability;
         freeze = stop.stop_requested ? freeze_manager.resetToLive() : freeze_manager.update(intent, controller_dt_s);
 
         AssistInputs assist_inputs{};
@@ -347,6 +351,7 @@ int runReplay(const ReplayOptions& options) {
         assist_inputs.faulted = !state.healthy;
 
         AssistOutput assist = assist_state_machine.update(assist_inputs, controller_dt_s);
+        last_assist_state = assist.state;
         TorqueCommand torque = assist.state == AssistState::Stopping
             ? stop_torque_limiter.update(previous_torque, controller_dt_s)
             : torque_profile.compute(phase.phase_rad, phase.frequency_hz, assist.torque_scale, assist.allow_output);
