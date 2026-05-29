@@ -265,6 +265,41 @@ def interpolate_reference(rows: Sequence[Dict[str, str]], events: Sequence[Tuple
     return ref_phase, ref_freq
 
 
+
+def contiguous_gait_segments(rows: Sequence[Dict[str, str]]) -> List[Tuple[int, int]]:
+    segments: List[Tuple[int, int]] = []
+    start: Optional[int] = None
+    for i, row in enumerate(rows):
+        if is_gait_torque_row(row):
+            if start is None:
+                start = i
+        elif start is not None:
+            if i - start >= 2:
+                segments.append((start, i))
+            start = None
+    if start is not None and len(rows) - start >= 2:
+        segments.append((start, len(rows)))
+    return segments
+
+
+def interpolate_reference_for_gait_segments(rows: Sequence[Dict[str, str]], peak_min_spread_deg: float) -> Tuple[List[Optional[float]], List[Optional[float]], List[Tuple[float, float, str]]]:
+    ref_phase: List[Optional[float]] = [None] * len(rows)
+    ref_freq: List[Optional[float]] = [None] * len(rows)
+    all_events: List[Tuple[float, float, str]] = []
+
+    for start, end in contiguous_gait_segments(rows):
+        segment_rows = rows[start:end]
+        events = detect_phase_events(segment_rows, peak_min_spread_deg)
+        all_events.extend(events)
+        segment_phase, segment_freq = interpolate_reference(segment_rows, events)
+        for offset, (phase, freq) in enumerate(zip(segment_phase, segment_freq)):
+            ref_phase[start + offset] = phase
+            ref_freq[start + offset] = freq
+
+    all_events.sort(key=lambda event: event[0])
+    return ref_phase, ref_freq, all_events
+
+
 def torque_rates(rows: Sequence[Dict[str, str]], key: str) -> List[float]:
     rates: List[float] = []
     for prev, curr in zip(rows, rows[1:]):
@@ -312,12 +347,13 @@ def local_peak_phase_errors(rows: Sequence[Dict[str, str]], lead_angle_rad: floa
 
 
 def compute_metrics(rows: Sequence[Dict[str, str]], peak_min_spread_deg: float = 18.0, lead_angle_rad: float = 0.20, torque_epsilon_nm: float = 1e-6) -> Tuple[Dict[str, object], List[Optional[float]], List[Optional[float]], List[Tuple[float, float, str]]]:
-    events = detect_phase_events(rows, peak_min_spread_deg)
-    ref_phase, ref_freq = interpolate_reference(rows, events)
+    ref_phase, ref_freq, events = interpolate_reference_for_gait_segments(rows, peak_min_spread_deg)
 
-    phase_errors = [wrap_to_pi(fnum(row, "Phase") - ref) for row, ref in zip(rows, ref_phase) if ref is not None]
+    phase_eval_pairs = [(row, ref) for row, ref in zip(rows, ref_phase) if ref is not None and is_gait_torque_row(row)]
+    freq_eval_pairs = [(row, ref) for row, ref in zip(rows, ref_freq) if ref is not None and is_gait_torque_row(row)]
+    phase_errors = [wrap_to_pi(fnum(row, "Phase") - ref) for row, ref in phase_eval_pairs]
     abs_phase_percent = [abs(e) / TAU * 100.0 for e in phase_errors]
-    freq_errors = [fnum(row, "Frequency") - ref for row, ref in zip(rows, ref_freq) if ref is not None]
+    freq_errors = [fnum(row, "Frequency") - ref for row, ref in freq_eval_pairs]
     reconstruction_errors = [fnum(row, "AoSignalErrorRad") for row in rows if "AoSignalErrorRad" in row and row.get("AoSignalErrorRad", "") != ""]
 
     left_torques = [fnum(r, "LeftTorqueCmd") for r in rows]
@@ -369,7 +405,7 @@ def compute_metrics(rows: Sequence[Dict[str, str]], peak_min_spread_deg: float =
 
     convergence_time_s: Optional[float] = None
     if phase_errors:
-        valid_pairs = [(fnum(row, "MonoTimeS"), abs(wrap_to_pi(fnum(row, "Phase") - ref)) / TAU * 100.0) for row, ref in zip(rows, ref_phase) if ref is not None]
+        valid_pairs = [(fnum(row, "MonoTimeS"), abs(wrap_to_pi(fnum(row, "Phase") - ref)) / TAU * 100.0) for row, ref in phase_eval_pairs]
         for t, err in valid_pairs:
             if err <= 5.0:
                 convergence_time_s = t - valid_pairs[0][0]
@@ -379,6 +415,8 @@ def compute_metrics(rows: Sequence[Dict[str, str]], peak_min_spread_deg: float =
         "sample_count": len(rows),
         "duration_s": duration,
         "reference_event_count": len(events),
+        "phase_eval_sample_count": len(phase_eval_pairs),
+        "frequency_eval_sample_count": len(freq_eval_pairs),
         "phase_rmse_rad": rmse(phase_errors),
         "phase_rmse_deg": None if rmse(phase_errors) is None else rmse(phase_errors) * RAD_TO_DEG,
         "phase_rmse_percent": None if rmse(phase_errors) is None else rmse(phase_errors) / TAU * 100.0,
