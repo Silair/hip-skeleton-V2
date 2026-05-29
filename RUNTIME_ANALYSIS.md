@@ -124,3 +124,127 @@ python3 hs_exoskeleton_v2/tools/analyze_run.py <runtime.csv> --fail-on-evaluatio
 
 如果还没有实机 runtime CSV，可以先使用 `OFFLINE_REPLAY.md` 中的曲线生成器和 `hs_exoskeleton_v2_replay` 离线生成同结构日志，再运行本分析脚本。这样可以在上实机前检查 AO 相位误差、频率追踪、助力峰值相位、冻结/禁止输出违规等指标。
 
+
+## TODO：双层 AO / Gait-Based AO 用于步频突变适应
+
+### 背景
+
+严格离线曲线 `multi_rate` 暴露出当前 AO 的一个真实短板：
+
+```text
+0.6 Hz -> 1.2 Hz -> 0.75 Hz -> 1.35 Hz -> 0.9 Hz
+```
+
+这类分段突变步频会让当前单层 AO 来不及重新锁相，表现为：
+
+- `phase_rmse_percent` 升高；
+- `phase_abs_error_p95_percent` 升高；
+- `frequency_rmse_hz` 升高；
+- 频率变化导致力矩变化率接近或超过阈值。
+
+这和文献 **Effective Prediction of Gait Phase for Assisted Walking by Means of Gait-Based Adaptive Oscillators**（IEEE T-ASE 2025, DOI: `10.1109/TASE.2024.3520148`）讨论的问题一致：传统 AO 在稳态行走中有效，但在频繁 stop/go 或步频变化时通常需要多个 stride 才能同步，可能导致过渡期相位预测不准。
+
+### 文献思路摘要
+
+该论文提出 gait-based adaptive oscillator，核心是 **two-level AO systems**：
+
+1. **高层 AO**
+   - 从上一 stride 学习步态参数；
+   - 提取上一 stride 的频率、幅值、相位等高层参数；
+   - 在新 stride 初期把学习到的参数传给低层 AO。
+
+2. **低层 AO**
+   - 实时估计当前 stride 的相位；
+   - 不完全从零开始适应，而是使用高层 AO 提供的初始/更新参数；
+   - 目标是在非稳态行走中更快同步。
+
+论文目标是减少传统 AO 在步频变化时的多周期收敛时间，使外骨骼辅助能更快、更稳定地跟上 stop/go 和 cadence change。
+
+### 当前 V2 的轻量化可行方案
+
+不建议一开始完整复刻论文中的双层 AO。当前 V2 可先实现一个轻量版：
+
+> **Anchor-based high-level frequency update**
+
+利用现有 `PhaseEstimator` 中的峰/谷 anchor 检测，在检测到可靠 anchor 后，用相邻 anchor 的时间间隔估计步频，并快速融合到低层 AO 的 `omega`。
+
+#### 初版算法草案
+
+峰到谷是半个周期，因此：
+
+```cpp
+measured_frequency_hz = 0.5 / (current_anchor_time_s - last_anchor_time_s);
+```
+
+然后对低层 AO 的频率做快速融合：
+
+```cpp
+oscillator_.omega =
+    (1.0 - anchor_frequency_gain) * oscillator_.omega +
+    anchor_frequency_gain * measured_frequency_hz * 2.0 * M_PI;
+```
+
+建议配置：
+
+```cpp
+struct PhaseConfig {
+    ...
+    double anchor_frequency_gain = 0.45;
+    double anchor_frequency_min_hz = 0.45;
+    double anchor_frequency_max_hz = 1.60;
+};
+```
+
+必须保留保护条件：
+
+- anchor 间隔满足 `anchor_min_fraction_of_period`；
+- `spread_deg > peak_min_spread_deg`；
+- `measured_frequency_hz` 在合理范围内；
+- 停步 `Stopping` / `Frozen` 期间不更新高层频率。
+
+### 预期收益
+
+优先改善：
+
+- `multi_rate` 的 `frequency_rmse_hz`；
+- `multi_rate` 的 `phase_rmse_percent` 和 `phase_abs_error_p95_percent`；
+- 步频突变后 AO 的重新锁相时间。
+
+不应破坏：
+
+- `steady_0p8`；
+- `freq_ramp`；
+- `amp_ramp`；
+- `stop_go`；
+- `abrupt_stop`。
+
+### 风险
+
+- 噪声可能制造假 anchor，导致频率被错误快速更新；
+- 频率融合增益过大可能让 AO 抖动；
+- 对 `noisy_stop_go` 这类曲线，可能需要先增强峰/谷事件检测的抗噪性。
+
+### TODO
+
+- [ ] 在 `PhaseConfig` 中加入 anchor-based frequency update 参数：
+  - `anchor_frequency_gain`
+  - `anchor_frequency_min_hz`
+  - `anchor_frequency_max_hz`
+- [ ] 在 `PhaseEstimator` 中保存上一可靠 anchor 的时间和类型。
+- [ ] 在检测到新可靠 anchor 时，用 anchor 间隔估算 stride frequency。
+- [ ] 将估算频率融合进低层 AO 的 `oscillator_.omega`。
+- [ ] 确保 `Stopping` / `Frozen` 期间不更新该高层频率。
+- [ ] 增加 C++ 回归测试：频率突变时 `PhaseEstimator` 能更快更新频率。
+- [ ] 重跑离线曲线：
+  - `steady_0p8`
+  - `freq_ramp`
+  - `amp_ramp`
+  - `stop_go`
+  - `abrupt_stop`
+  - `multi_rate`
+  - `repeated_stop_go`
+- [ ] 若 `noisy_stop_go` 变差，增加 anchor 过零滞回 / 最小显著性 / 事件确认机制。
+
+### 当前结论
+
+该方向适合当前 V2 的 `multi_rate` 问题。它不是单纯调参，而是给单层 AO 增加一个“高层 stride 参数学习/快速频率重估”机制，属于论文双层 AO 思路的轻量工程化版本。
