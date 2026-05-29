@@ -67,6 +67,36 @@ def amplitude_ramp(t: float, duration: float, min_amplitude: float, max_amplitud
     return min_amplitude + (max_amplitude - min_amplitude) * ratio
 
 
+def repeated_stop_go_signal(args: argparse.Namespace, t: float) -> float:
+    cycle = max(args.stop_cycle_s, 1e-9)
+    stop_window = min(max(args.stop_window_s, 0.0), cycle)
+    walk_window = max(cycle - stop_window, 1e-9)
+    cycle_index = math.floor(t / cycle)
+    local_t = t - cycle_index * cycle
+    walked_time = cycle_index * walk_window + min(local_t, walk_window)
+    if local_t >= walk_window:
+        hold_walked_time = cycle_index * walk_window + walk_window
+        return args.amplitude_rad * math.sin(TAU * args.frequency_hz * hold_walked_time)
+    ramp = min(1.0, local_t / max(args.stop_transition_s, 1e-9))
+    return ramp * args.amplitude_rad * math.sin(TAU * args.frequency_hz * walked_time)
+
+
+def multi_rate_signal(args: argparse.Namespace, t: float) -> float:
+    rates = [float(part) for part in args.rate_sequence_hz.split(",") if part.strip()]
+    if not rates:
+        rates = [args.frequency_hz]
+    segment_duration = args.duration_s / len(rates)
+    phase_cycles = 0.0
+    remaining_t = min(max(t, 0.0), args.duration_s)
+    for rate in rates:
+        span = min(segment_duration, remaining_t)
+        phase_cycles += rate * span
+        remaining_t -= span
+        if remaining_t <= 1e-12:
+            break
+    return args.amplitude_rad * math.sin(TAU * phase_cycles)
+
+
 def signal_for_scenario(args: argparse.Namespace, t: float) -> float:
     if args.scenario == "sine":
         phase = TAU * args.frequency_hz * t
@@ -88,6 +118,10 @@ def signal_for_scenario(args: argparse.Namespace, t: float) -> float:
         effective_t = min(t, hold_t)
         phase = TAU * args.frequency_hz * effective_t
         return args.amplitude_rad * math.sin(phase)
+    if args.scenario == "repeated_stop_go":
+        return repeated_stop_go_signal(args, t)
+    if args.scenario == "multi_rate":
+        return multi_rate_signal(args, t)
     raise ValueError(f"scenario {args.scenario!r} should be handled by expressions")
 
 
@@ -170,7 +204,7 @@ def write_curve(path: Path, rows: List[Tuple[float, float, float, int, int]]) ->
 def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate a joint-angle curve CSV for V2 offline replay.")
     parser.add_argument("--output", required=True, help="Output curve CSV path.")
-    parser.add_argument("--scenario", choices=["sine", "stop_go", "freq_ramp", "amplitude_ramp", "abrupt_stop", "asymmetric", "custom"], default="sine")
+    parser.add_argument("--scenario", choices=["sine", "stop_go", "freq_ramp", "amplitude_ramp", "abrupt_stop", "repeated_stop_go", "multi_rate", "asymmetric", "custom"], default="sine")
     parser.add_argument("--duration-s", type=float, default=12.0)
     parser.add_argument("--rate-hz", type=float, default=50.0)
     parser.add_argument("--amplitude-rad", type=float, default=0.35)
@@ -179,6 +213,10 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--min-amplitude-rad", type=float, default=0.08)
     parser.add_argument("--stop-time-s", type=float, default=0.0, help="Time where abrupt_stop holds the current nonzero pose; defaults to 40% of duration")
     parser.add_argument("--asymmetry-phase-rad", type=float, default=0.25)
+    parser.add_argument("--stop-cycle-s", type=float, default=3.0)
+    parser.add_argument("--stop-window-s", type=float, default=0.8)
+    parser.add_argument("--stop-transition-s", type=float, default=0.25)
+    parser.add_argument("--rate-sequence-hz", default="0.6,1.2,0.8,1.4", help="Comma-separated segment rates for multi_rate scenario")
     parser.add_argument("--noise-rad", type=float, default=0.0)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--left-expr", help="Custom Python math expression using t, pi, tau, sin/cos/etc.")
@@ -195,6 +233,14 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         args.stop_time_s = args.duration_s * 0.40
     if args.min_amplitude_rad < 0.0:
         parser.error("--min-amplitude-rad must be non-negative")
+    if args.stop_cycle_s <= 0.0:
+        parser.error("--stop-cycle-s must be positive")
+    if args.stop_window_s < 0.0:
+        parser.error("--stop-window-s must be non-negative")
+    if args.stop_window_s >= args.stop_cycle_s:
+        parser.error("--stop-window-s must be smaller than --stop-cycle-s")
+    if args.stop_transition_s <= 0.0:
+        parser.error("--stop-transition-s must be positive")
     return args
 
 

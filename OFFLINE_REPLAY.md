@@ -68,6 +68,8 @@ LeftJointVelRadS,RightJointVelRadS,Healthy,Enabled
 - `amplitude_ramp`：步幅从小到大再变小；适合看助力进入/退出边界。
 - `abrupt_stop`：正常行走后停在非零开合姿态；适合复现“停下后大 spread 误助力”。
 - `asymmetric`：左右幅值和相位略不一致；适合看真实非对称步态下的相位/力矩鲁棒性。
+- `repeated_stop_go`：多次走停循环；适合压力测试停步/恢复、残余力矩和多次状态切换。
+- `multi_rate`：分段多速率步态；适合压力测试 AO 对突变步频的重新锁相能力。
 - `custom`：用表达式直接设计左右关节角。
 
 示例：
@@ -97,9 +99,11 @@ python3 tools/make_replay_curve.py --output /tmp/amp_ramp.csv --scenario amplitu
 python3 tools/make_replay_curve.py --output /tmp/stop_go.csv --scenario stop_go --duration-s 18 --rate-hz 50 --amplitude-rad 0.35 --frequency-hz 0.8
 python3 tools/make_replay_curve.py --output /tmp/abrupt_stop.csv --scenario abrupt_stop --duration-s 12 --rate-hz 50 --amplitude-rad 0.35 --frequency-hz 0.8 --stop-time-s 5.2
 python3 tools/make_replay_curve.py --output /tmp/asymmetric.csv --scenario asymmetric --duration-s 12 --rate-hz 50 --amplitude-rad 0.35 --frequency-hz 0.8
+python3 tools/make_replay_curve.py --output /tmp/repeated_stop_go.csv --scenario repeated_stop_go --duration-s 24 --rate-hz 50 --amplitude-rad 0.35 --frequency-hz 0.8 --stop-cycle-s 4.0 --stop-window-s 1.0
+python3 tools/make_replay_curve.py --output /tmp/multi_rate.csv --scenario multi_rate --duration-s 20 --rate-hz 50 --amplitude-rad 0.35 --rate-sequence-hz 0.6,1.2,0.75,1.35,0.9
 ```
 
-其中 `sine` 和 `freq_ramp` 应优先 PASS；`stop_go`、`abrupt_stop`、`amplitude_ramp` 是过渡/边界压力测试，重点看静止误助力、停步后的力矩降为 0、恢复时间和状态时序，不应只按单一总评判断。
+其中 `sine`、`freq_ramp`、`amplitude_ramp`、`stop_go`、`abrupt_stop` 应优先 PASS。`repeated_stop_go` 和 `multi_rate` 是更严格的压力测试：前者重点看多次停步恢复后的残余力矩和峰值相位边界，后者重点看步频突变时 AO 重新锁相和力矩变化率。
 
 ## 输出与评价
 

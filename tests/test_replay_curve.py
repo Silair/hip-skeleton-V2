@@ -113,5 +113,45 @@ class ReplayCurveGenerationTest(unittest.TestCase):
             self.assertGreater(max(diffs), 0.02)
 
 
+    def test_repeated_stop_go_contains_multiple_stationary_windows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "repeated_stop_go.csv"
+            make_replay_curve.main([
+                "--output", str(output),
+                "--scenario", "repeated_stop_go",
+                "--duration-s", "12.0",
+                "--rate-hz", "20",
+                "--amplitude-rad", "0.35",
+                "--frequency-hz", "0.8",
+                "--stop-cycle-s", "3.0",
+                "--stop-window-s", "0.8",
+            ])
+            rows = self.read_rows(output)
+            speeds = [abs(float(r["LeftJointVelRadS"])) + abs(float(r["RightJointVelRadS"])) for r in rows]
+            stopped = [v < 1e-9 for v in speeds]
+            transitions_to_stop = sum(1 for prev, curr in zip(stopped, stopped[1:]) if not prev and curr)
+            self.assertGreaterEqual(transitions_to_stop, 3)
+
+    def test_multi_rate_curve_changes_frequency_by_segments(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "multi_rate.csv"
+            make_replay_curve.main([
+                "--output", str(output),
+                "--scenario", "multi_rate",
+                "--duration-s", "12.0",
+                "--rate-hz", "50",
+                "--amplitude-rad", "0.35",
+            ])
+            rows = self.read_rows(output)
+            # Compare zero-crossing density in first and middle thirds; the middle segment is faster.
+            signals = [float(r["LeftJointPosRad"]) + float(r["RightJointPosRad"]) for r in rows]
+            n = len(signals)
+            def crossings(values):
+                return sum(1 for a, b in zip(values, values[1:]) if (a <= 0 < b) or (a >= 0 > b))
+            first = crossings(signals[: n // 3])
+            middle = crossings(signals[n // 3 : 2 * n // 3])
+            self.assertGreater(middle, first)
+
+
 if __name__ == "__main__":
     unittest.main()
