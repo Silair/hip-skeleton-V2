@@ -1,0 +1,284 @@
+{
+  "status": "FAIL",
+  "passed": false,
+  "summary": "控制效果未达标：2 项检查失败",
+  "disclaimer": "本评价仅用于离线控制日志质量检查。PASS 表示当前日志中的控制指标满足配置阈值，不代表临床安全性、人体实验许可或硬件实际输出验证。",
+  "thresholds": {
+    "min_reference_events": 4.0,
+    "phase_rmse_percent": 5.0,
+    "phase_abs_error_p95_percent": 10.0,
+    "frequency_rmse_hz": 0.1,
+    "frequency_adaptation_time_mean_s": 1.0,
+    "phase_adaptation_time_mean_s": 1.0,
+    "combined_adaptation_time_mean_s": 1.0,
+    "ao_reconstruction_rmse_rad": 0.2,
+    "convergence_time_s_at_5_percent": 4.0,
+    "max_abs_torque_nm": 8.0,
+    "max_torque_rate_nm_s": 80.0,
+    "freeze_torque_violation_count": 0.0,
+    "disallow_output_torque_violation_count": 0.0,
+    "stationary_false_assist_s": 0.5,
+    "anchor_update_during_stop_count": 0.0,
+    "simultaneous_high_torque_ratio": 0.02,
+    "peak_torque_phase_mae_deg": 15.0
+  },
+  "groups": {
+    "phase_tracking": {
+      "label": "相位/频率跟踪",
+      "status": "FAIL",
+      "checks": [
+        {
+          "key": "reference_event_count",
+          "label": "参考相位事件数",
+          "value": 3.0,
+          "operator": ">=",
+          "threshold": 4.0,
+          "unit": "events",
+          "required": true,
+          "status": "FAIL",
+          "passed": false,
+          "message": "参考相位事件数: 3.0000 >= 4.0000 events"
+        },
+        {
+          "key": "phase_rmse_percent",
+          "label": "相位 RMSE",
+          "value": 3.469141899873015,
+          "operator": "<=",
+          "threshold": 5.0,
+          "unit": "% gait",
+          "required": true,
+          "status": "PASS",
+          "passed": true,
+          "message": "相位 RMSE: 3.4691 <= 5.0000 % gait"
+        },
+        {
+          "key": "phase_abs_error_p95_percent",
+          "label": "相位误差 P95",
+          "value": 4.783689714979184,
+          "operator": "<=",
+          "threshold": 10.0,
+          "unit": "% gait",
+          "required": true,
+          "status": "PASS",
+          "passed": true,
+          "message": "相位误差 P95: 4.7837 <= 10.0000 % gait"
+        },
+        {
+          "key": "frequency_rmse_hz",
+          "label": "频率 RMSE",
+          "value": 0.013503568952067216,
+          "operator": "<=",
+          "threshold": 0.1,
+          "unit": "Hz",
+          "required": true,
+          "status": "PASS",
+          "passed": true,
+          "message": "频率 RMSE: 0.0135 <= 0.1000 Hz"
+        },
+        {
+          "key": "frequency_adaptation_time_mean_s",
+          "label": "频率突变后频率重锁均值",
+          "value": null,
+          "operator": "<=",
+          "threshold": 1.0,
+          "unit": "s",
+          "required": false,
+          "status": "SKIP",
+          "passed": true,
+          "message": "频率突变后频率重锁均值: insufficient data"
+        },
+        {
+          "key": "phase_adaptation_time_mean_s",
+          "label": "频率突变后相位重锁均值",
+          "value": null,
+          "operator": "<=",
+          "threshold": 1.0,
+          "unit": "s",
+          "required": false,
+          "status": "SKIP",
+          "passed": true,
+          "message": "频率突变后相位重锁均值: insufficient data"
+        },
+        {
+          "key": "combined_adaptation_time_mean_s",
+          "label": "频率突变后二者重锁均值",
+          "value": null,
+          "operator": "<=",
+          "threshold": 1.0,
+          "unit": "s",
+          "required": false,
+          "status": "SKIP",
+          "passed": true,
+          "message": "频率突变后二者重锁均值: insufficient data"
+        },
+        {
+          "key": "ao_reconstruction_rmse_rad",
+          "label": "AO 重构 RMSE",
+          "value": 0.03536446186890656,
+          "operator": "<=",
+          "threshold": 0.2,
+          "unit": "rad",
+          "required": false,
+          "status": "PASS",
+          "passed": true,
+          "message": "AO 重构 RMSE: 0.0354 <= 0.2000 rad"
+        },
+        {
+          "key": "convergence_time_s_at_5_percent",
+          "label": "5% 相位误差收敛时间",
+          "value": 0.0,
+          "operator": "<=",
+          "threshold": 4.0,
+          "unit": "s",
+          "required": false,
+          "status": "PASS",
+          "passed": true,
+          "message": "5% 相位误差收敛时间: 0.0000 <= 4.0000 s"
+        }
+      ],
+      "failed_count": 1,
+      "warning_count": 0,
+      "skipped_count": 3
+    },
+    "torque_assist": {
+      "label": "助力力矩效果",
+      "status": "FAIL",
+      "checks": [
+        {
+          "key": "max_abs_torque_nm",
+          "label": "最大绝对力矩",
+          "value": 3.97457,
+          "operator": "<=",
+          "threshold": 8.0,
+          "unit": "Nm",
+          "required": true,
+          "status": "PASS",
+          "passed": true,
+          "message": "最大绝对力矩: 3.9746 <= 8.0000 Nm"
+        },
+        {
+          "key": "max_torque_rate_nm_s",
+          "label": "最大力矩变化率",
+          "value": 40.000050000000854,
+          "operator": "<=",
+          "threshold": 80.0,
+          "unit": "Nm/s",
+          "required": true,
+          "status": "PASS",
+          "passed": true,
+          "message": "最大力矩变化率: 40.0001 <= 80.0000 Nm/s"
+        },
+        {
+          "key": "simultaneous_high_torque_ratio",
+          "label": "双侧同时高力矩比例",
+          "value": 0.0,
+          "operator": "<=",
+          "threshold": 0.02,
+          "unit": "ratio",
+          "required": false,
+          "status": "PASS",
+          "passed": true,
+          "message": "双侧同时高力矩比例: 0.0000 <= 0.0200 ratio"
+        },
+        {
+          "key": "peak_torque_phase_mae_deg",
+          "label": "峰值力矩相位 MAE",
+          "value": 17.533217669114663,
+          "operator": "<=",
+          "threshold": 15.0,
+          "unit": "deg",
+          "required": true,
+          "status": "FAIL",
+          "passed": false,
+          "message": "峰值力矩相位 MAE: 17.5332 <= 15.0000 deg"
+        }
+      ],
+      "failed_count": 1,
+      "warning_count": 0,
+      "skipped_count": 0
+    },
+    "safety_gating": {
+      "label": "安全门控",
+      "status": "PASS",
+      "checks": [
+        {
+          "key": "freeze_torque_violation_count",
+          "label": "冻结时非零力矩违规",
+          "value": 0.0,
+          "operator": "==",
+          "threshold": 0.0,
+          "unit": "frames",
+          "required": true,
+          "status": "PASS",
+          "passed": true,
+          "message": "冻结时非零力矩违规: 0.0000 == 0.0000 frames"
+        },
+        {
+          "key": "disallow_output_torque_violation_count",
+          "label": "禁止输出时非零力矩违规",
+          "value": 0.0,
+          "operator": "==",
+          "threshold": 0.0,
+          "unit": "frames",
+          "required": true,
+          "status": "PASS",
+          "passed": true,
+          "message": "禁止输出时非零力矩违规: 0.0000 == 0.0000 frames"
+        },
+        {
+          "key": "stationary_false_assist_s",
+          "label": "静止误助力时长",
+          "value": 0.0,
+          "operator": "<=",
+          "threshold": 0.5,
+          "unit": "s",
+          "required": true,
+          "status": "PASS",
+          "passed": true,
+          "message": "静止误助力时长: 0.0000 <= 0.5000 s"
+        },
+        {
+          "key": "anchor_update_during_stop_count",
+          "label": "停步上下文频率 anchor 更新",
+          "value": 0.0,
+          "operator": "==",
+          "threshold": 0.0,
+          "unit": "frames",
+          "required": false,
+          "status": "PASS",
+          "passed": true,
+          "message": "停步上下文频率 anchor 更新: 0.0000 == 0.0000 frames"
+        }
+      ],
+      "failed_count": 0,
+      "warning_count": 0,
+      "skipped_count": 0
+    }
+  },
+  "failed_checks": [
+    {
+      "key": "reference_event_count",
+      "label": "参考相位事件数",
+      "value": 3.0,
+      "operator": ">=",
+      "threshold": 4.0,
+      "unit": "events",
+      "required": true,
+      "status": "FAIL",
+      "passed": false,
+      "message": "参考相位事件数: 3.0000 >= 4.0000 events"
+    },
+    {
+      "key": "peak_torque_phase_mae_deg",
+      "label": "峰值力矩相位 MAE",
+      "value": 17.533217669114663,
+      "operator": "<=",
+      "threshold": 15.0,
+      "unit": "deg",
+      "required": true,
+      "status": "FAIL",
+      "passed": false,
+      "message": "峰值力矩相位 MAE: 17.5332 <= 15.0000 deg"
+    }
+  ]
+}

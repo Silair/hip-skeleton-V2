@@ -1,0 +1,28 @@
+{
+  "segment_label": "0.60Hz_0-4s",
+  "sample_count": 200,
+  "duration_s": 3.98,
+  "target_frequency_hz": 0.6,
+  "expected_half_period_s": 0.8333333333333334,
+  "spread_deg_max": 19.94,
+  "spread_deg_p95": 19.867465,
+  "spread_deg_mean": 12.8848227755,
+  "velocity_abs_max": 75.1544,
+  "velocity_abs_p95": 74.86414,
+  "velocity_abs_mean": 46.33746841,
+  "phase_signal_amplitude_rad": 0.699944,
+  "filtered_phase_signal_amplitude_rad": 0.6960310000000001,
+  "zero_cross_count": 5,
+  "velocity_sign_change_count": 5,
+  "candidate_count": 0,
+  "anchor_detected_count": 0,
+  "startup_prior_candidate_count": 22,
+  "startup_prior_applied_count": 1,
+  "anchor_min_spread_deg": 4.0,
+  "anchor_min_velocity_deg_s": 8.0,
+  "spread_below_threshold": false,
+  "velocity_below_threshold": false,
+  "likely_causes": [
+    "signal_ok_but_anchor_candidate_gate_failed"
+  ]
+}

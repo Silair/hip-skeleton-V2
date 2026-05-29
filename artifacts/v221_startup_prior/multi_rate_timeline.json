@@ -1,0 +1,230 @@
+{
+  "log_path": "/tmp/hsx_v221_bench/logs/2026.05.29/multi_rate_1_2026.05.29.csv",
+  "anchor_update_count": 15,
+  "updates_by_segment": {
+    "0.60Hz": 0,
+    "1.20Hz": 3,
+    "0.75Hz": 1,
+    "1.35Hz": 8,
+    "0.90Hz": 3
+  },
+  "segment_diagnostics": {
+    "0.60Hz": {
+      "anchor_candidate_count": 0,
+      "anchor_detected_count": 0,
+      "anchor_update_count": 0,
+      "anchor_reject_reason_counts": {
+        "UnreliableSignal": 5
+      }
+    },
+    "1.20Hz": {
+      "anchor_candidate_count": 9,
+      "anchor_detected_count": 9,
+      "anchor_update_count": 3,
+      "anchor_reject_reason_counts": {
+        "Warmup": 1,
+        "LowConfidence": 4
+      }
+    },
+    "0.75Hz": {
+      "anchor_candidate_count": 1,
+      "anchor_detected_count": 1,
+      "anchor_update_count": 1,
+      "anchor_reject_reason_counts": {
+        "UnreliableSignal": 5
+      }
+    },
+    "1.35Hz": {
+      "anchor_candidate_count": 11,
+      "anchor_detected_count": 11,
+      "anchor_update_count": 8,
+      "anchor_reject_reason_counts": {
+        "Interval": 1,
+        "LowConfidence": 2
+      }
+    },
+    "0.90Hz": {
+      "anchor_candidate_count": 4,
+      "anchor_detected_count": 4,
+      "anchor_update_count": 3,
+      "anchor_reject_reason_counts": {
+        "UnreliableSignal": 3,
+        "Interval": 1
+      }
+    }
+  },
+  "anchor_reject_reason_counts": {
+    "UnreliableSignal": 13,
+    "Warmup": 1,
+    "LowConfidence": 6,
+    "Interval": 2
+  },
+  "events": [
+    {
+      "time_s": 6.86,
+      "assist_state": "Active",
+      "stop_probability": 0.471176,
+      "measured_frequency_hz": 1.19048,
+      "omega_correction_hz": -6.14647e-05,
+      "frequency_hz": 1.191,
+      "anchor_confidence": 0.705772,
+      "anchor_reject_reason": 0,
+      "segment": "1.20Hz"
+    },
+    {
+      "time_s": 7.26,
+      "assist_state": "Active",
+      "stop_probability": 0.368855,
+      "measured_frequency_hz": 1.25,
+      "omega_correction_hz": -0.0181204,
+      "frequency_hz": 1.30155,
+      "anchor_confidence": 0.743068,
+      "anchor_reject_reason": 0,
+      "segment": "1.20Hz"
+    },
+    {
+      "time_s": 7.68,
+      "assist_state": "Active",
+      "stop_probability": 0.351499,
+      "measured_frequency_hz": 1.19048,
+      "omega_correction_hz": -0.0254648,
+      "frequency_hz": 1.31715,
+      "anchor_confidence": 0.643061,
+      "anchor_reject_reason": 0,
+      "segment": "1.20Hz"
+    },
+    {
+      "time_s": 8.12,
+      "assist_state": "Active",
+      "stop_probability": 0.347679,
+      "measured_frequency_hz": 1.13636,
+      "omega_correction_hz": -0.0210079,
+      "frequency_hz": 1.20526,
+      "anchor_confidence": 0.667648,
+      "anchor_reject_reason": 0,
+      "segment": "0.75Hz"
+    },
+    {
+      "time_s": 13.2,
+      "assist_state": "Active",
+      "stop_probability": 0.379652,
+      "measured_frequency_hz": 1.38889,
+      "omega_correction_hz": 0.0254648,
+      "frequency_hz": 1.2249,
+      "anchor_confidence": 0.670295,
+      "anchor_reject_reason": 0,
+      "segment": "1.35Hz"
+    },
+    {
+      "time_s": 13.58,
+      "assist_state": "Active",
+      "stop_probability": 0.358169,
+      "measured_frequency_hz": 1.31579,
+      "omega_correction_hz": -0.00952754,
+      "frequency_hz": 1.34373,
+      "anchor_confidence": 0.726598,
+      "anchor_reject_reason": 0,
+      "segment": "1.35Hz"
+    },
+    {
+      "time_s": 13.94,
+      "assist_state": "Active",
+      "stop_probability": 0.344721,
+      "measured_frequency_hz": 1.38889,
+      "omega_correction_hz": 0.0148217,
+      "frequency_hz": 1.35001,
+      "anchor_confidence": 0.788623,
+      "anchor_reject_reason": 0,
+      "segment": "1.35Hz"
+    },
+    {
+      "time_s": 14.32,
+      "assist_state": "Active",
+      "stop_probability": 0.318173,
+      "measured_frequency_hz": 1.31579,
+      "omega_correction_hz": -0.0064128,
+      "frequency_hz": 1.33409,
+      "anchor_confidence": 0.74147,
+      "anchor_reject_reason": 0,
+      "segment": "1.35Hz"
+    },
+    {
+      "time_s": 14.68,
+      "assist_state": "Active",
+      "stop_probability": 0.31988,
+      "measured_frequency_hz": 1.38889,
+      "omega_correction_hz": 0.0169141,
+      "frequency_hz": 1.3445,
+      "anchor_confidence": 0.788272,
+      "anchor_reject_reason": 0,
+      "segment": "1.35Hz"
+    },
+    {
+      "time_s": 15.06,
+      "assist_state": "Active",
+      "stop_probability": 0.316961,
+      "measured_frequency_hz": 1.31579,
+      "omega_correction_hz": -0.0082131,
+      "frequency_hz": 1.33923,
+      "anchor_confidence": 0.741371,
+      "anchor_reject_reason": 0,
+      "segment": "1.35Hz"
+    },
+    {
+      "time_s": 15.42,
+      "assist_state": "Active",
+      "stop_probability": 0.321454,
+      "measured_frequency_hz": 1.38889,
+      "omega_correction_hz": 0.0129366,
+      "frequency_hz": 1.35588,
+      "anchor_confidence": 0.804453,
+      "anchor_reject_reason": 0,
+      "segment": "1.35Hz"
+    },
+    {
+      "time_s": 15.8,
+      "assist_state": "Active",
+      "stop_probability": 0.319366,
+      "measured_frequency_hz": 1.31579,
+      "omega_correction_hz": -0.0108065,
+      "frequency_hz": 1.34677,
+      "anchor_confidence": 0.73884,
+      "anchor_reject_reason": 0,
+      "segment": "1.35Hz"
+    },
+    {
+      "time_s": 16.22,
+      "assist_state": "Active",
+      "stop_probability": 0.359929,
+      "measured_frequency_hz": 1.19048,
+      "omega_correction_hz": -0.0254648,
+      "frequency_hz": 1.30556,
+      "anchor_confidence": 0.628145,
+      "anchor_reject_reason": 0,
+      "segment": "0.90Hz"
+    },
+    {
+      "time_s": 18.44,
+      "assist_state": "Active",
+      "stop_probability": 0.319489,
+      "measured_frequency_hz": 0.925926,
+      "omega_correction_hz": 0.0127454,
+      "frequency_hz": 0.886839,
+      "anchor_confidence": 0.70257,
+      "anchor_reject_reason": 0,
+      "segment": "0.90Hz"
+    },
+    {
+      "time_s": 19.0,
+      "assist_state": "Active",
+      "stop_probability": 0.353766,
+      "measured_frequency_hz": 0.892857,
+      "omega_correction_hz": 0.000738411,
+      "frequency_hz": 0.89075,
+      "anchor_confidence": 0.741356,
+      "anchor_reject_reason": 0,
+      "segment": "0.90Hz"
+    }
+  ],
+  "edge_or_stop_context_updates": []
+}

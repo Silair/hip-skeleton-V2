@@ -1,9 +1,12 @@
 # V2.2 / V2.2.1 改动总结
 
-**仓库：** `hs_exoskeleton_v2`  
-**日期：** 2026-05-29  
-**本地提交：** V2.1 `43051d2` → V2.2 `584046e` → V2.2.1（本文件对应之提交）  
-**未推送远端**
+**仓库：** `hs_exoskeleton_v2`
+
+**日期：** 2026-05-29
+
+**本地提交：** V2.1 `43051d2` → V2.2 `584046e` → V2.2.1 `557f227`
+
+**收口验证：** 见 `artifacts/v221_startup_prior/V221_STARTUP_PRIOR_REPORT.md`
 
 ---
 
@@ -46,7 +49,7 @@
 
 ---
 
-## V2.2.1（本批未提交改动）
+## V2.2.1（commit `557f227`）
 
 ### 设计
 
@@ -100,9 +103,12 @@
 
 | 指标 | V2.2 | V2.2.1 |
 |------|------|--------|
-| `frequency_rmse_hz` | 0.206 | **0.204** |
+| `frequency_rmse_hz` | 0.2058 | **0.2035** |
+| `frequency_adaptation_time_mean_s` | 1.2400 | **1.2400** |
+| `combined_adaptation_time_mean_s` | 1.4067 | **1.3667** |
+| `phase_rmse_percent` | 11.5610 | **11.0838** |
 | `startup_prior_applied`（全段） | — | 1 |
-| **0–4 s 段 applied** | 0 | **1**（t≈1.28 s，prior≈**0.61 Hz**） |
+| **0–4 s 段 applied** | 0 | **1**（prior≈**0.6098 Hz**） |
 | `anchor_update_during_stop_count` | 0 | 0 |
 
 ### 单元测试
@@ -140,6 +146,8 @@ python3 -m unittest tests.test_analyze_run tests.test_startup_signal_diagnostics
 
 ## 后续路线图（建议）
 
-1. **实机 / 半实物：** `stop_go`、`repeated_stop_go` — 硬门槛 `anchor_update_during_stop_count = 0`
+收口报告：[`artifacts/v221_startup_prior/V221_STARTUP_PRIOR_REPORT.md`](../artifacts/v221_startup_prior/V221_STARTUP_PRIOR_REPORT.md)。
+
+1. **推送当前 V2.2.1 后做实机 / 半实物：** `stop_go`、`repeated_stop_go` — 硬门槛 `anchor_update_during_stop_count = 0`
 2. **V2.3：** stride segmentation **只记日志**，不参与控制
 3. **暂缓：** `anchor_phase_gain`、完整双层 AO（需 stride 切分稳定）

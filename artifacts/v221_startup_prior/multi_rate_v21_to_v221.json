@@ -1,0 +1,217 @@
+{
+  "status": "MIXED",
+  "comparable_metric_count": 16,
+  "improved_metric_count": 8,
+  "worsened_metric_count": 2,
+  "metrics": [
+    {
+      "key": "phase_rmse_percent",
+      "label": "Phase RMSE",
+      "unit": "% gait",
+      "direction": "lower_is_better",
+      "before": 11.569317620723938,
+      "after": 11.08376751332973,
+      "delta": -0.48555010739420723,
+      "relative_change_percent": -4.1968776665310745,
+      "verdict": "IMPROVED"
+    },
+    {
+      "key": "phase_abs_error_p95_percent",
+      "label": "Phase error P95",
+      "unit": "% gait",
+      "direction": "lower_is_better",
+      "before": 28.34194292322693,
+      "after": 26.800787514993203,
+      "delta": -1.5411554082337275,
+      "relative_change_percent": -5.437719680716428,
+      "verdict": "IMPROVED"
+    },
+    {
+      "key": "frequency_rmse_hz",
+      "label": "Frequency RMSE",
+      "unit": "Hz",
+      "direction": "lower_is_better",
+      "before": 0.2062548063967676,
+      "after": 0.2035032356154678,
+      "delta": -0.0027515707812998114,
+      "relative_change_percent": -1.3340638355872678,
+      "verdict": "IMPROVED"
+    },
+    {
+      "key": "frequency_mae_hz",
+      "label": "Frequency MAE",
+      "unit": "Hz",
+      "direction": "lower_is_better",
+      "before": 0.14135448868095454,
+      "after": 0.1389715003151106,
+      "delta": -0.002382988365843941,
+      "relative_change_percent": -1.6858243329099278,
+      "verdict": "IMPROVED"
+    },
+    {
+      "key": "frequency_adaptation_time_mean_s",
+      "label": "Frequency relock mean",
+      "unit": "s",
+      "direction": "lower_is_better",
+      "before": 1.273333333333334,
+      "after": 1.2400000000000009,
+      "delta": -0.033333333333333215,
+      "relative_change_percent": -2.617801047120408,
+      "verdict": "IMPROVED"
+    },
+    {
+      "key": "frequency_adaptation_time_max_s",
+      "label": "Frequency relock max",
+      "unit": "s",
+      "direction": "lower_is_better",
+      "before": 1.3800000000000008,
+      "after": 1.3800000000000008,
+      "delta": 0.0,
+      "relative_change_percent": 0.0,
+      "verdict": "UNCHANGED"
+    },
+    {
+      "key": "phase_adaptation_time_mean_s",
+      "label": "Phase relock mean",
+      "unit": "s",
+      "direction": "lower_is_better",
+      "before": 1.406666666666668,
+      "after": 1.3600000000000012,
+      "delta": -0.046666666666666856,
+      "relative_change_percent": -3.3175355450237065,
+      "verdict": "IMPROVED"
+    },
+    {
+      "key": "phase_adaptation_time_max_s",
+      "label": "Phase relock max",
+      "unit": "s",
+      "direction": "lower_is_better",
+      "before": 1.620000000000001,
+      "after": 1.620000000000001,
+      "delta": 0.0,
+      "relative_change_percent": 0.0,
+      "verdict": "UNCHANGED"
+    },
+    {
+      "key": "combined_adaptation_time_mean_s",
+      "label": "Combined relock mean",
+      "unit": "s",
+      "direction": "lower_is_better",
+      "before": 1.406666666666668,
+      "after": 1.3666666666666678,
+      "delta": -0.04000000000000026,
+      "relative_change_percent": -2.8436018957346128,
+      "verdict": "IMPROVED"
+    },
+    {
+      "key": "combined_adaptation_time_max_s",
+      "label": "Combined relock max",
+      "unit": "s",
+      "direction": "lower_is_better",
+      "before": 1.620000000000001,
+      "after": 1.620000000000001,
+      "delta": 0.0,
+      "relative_change_percent": 0.0,
+      "verdict": "UNCHANGED"
+    },
+    {
+      "key": "max_torque_rate_nm_s",
+      "label": "Max torque rate",
+      "unit": "Nm/s",
+      "direction": "lower_is_better",
+      "before": 64.02800000000136,
+      "after": 62.88950000000134,
+      "delta": -1.1385000000000147,
+      "relative_change_percent": -1.778128318860484,
+      "verdict": "IMPROVED"
+    },
+    {
+      "key": "torque_rate_p95_nm_s",
+      "label": "Torque rate P95",
+      "unit": "Nm/s",
+      "direction": "lower_is_better",
+      "before": 38.80875000000082,
+      "after": 39.10237500000083,
+      "delta": 0.2936250000000129,
+      "relative_change_percent": 0.7565948400811845,
+      "verdict": "WORSE"
+    },
+    {
+      "key": "peak_torque_phase_mae_deg",
+      "label": "Peak torque phase MAE",
+      "unit": "deg",
+      "direction": "lower_is_better",
+      "before": 3.560987367346777,
+      "after": 3.6171881905713734,
+      "delta": 0.05620082322459652,
+      "relative_change_percent": 1.5782370850270855,
+      "verdict": "WORSE"
+    },
+    {
+      "key": "omega_jump_p95_hz",
+      "label": "Omega jump P95",
+      "unit": "Hz",
+      "direction": "lower_is_better",
+      "before": 0.0254648,
+      "after": 0.0254648,
+      "delta": 0.0,
+      "relative_change_percent": 0.0,
+      "verdict": "UNCHANGED"
+    },
+    {
+      "key": "omega_jump_max_hz",
+      "label": "Omega jump max",
+      "unit": "Hz",
+      "direction": "lower_is_better",
+      "before": 0.0254648,
+      "after": 0.0254648,
+      "delta": 0.0,
+      "relative_change_percent": 0.0,
+      "verdict": "UNCHANGED"
+    },
+    {
+      "key": "anchor_update_during_stop_count",
+      "label": "Anchor update during stop",
+      "unit": "count",
+      "direction": "lower_is_better",
+      "before": null,
+      "after": 0.0,
+      "delta": null,
+      "relative_change_percent": null,
+      "verdict": "SKIP"
+    },
+    {
+      "key": "anchor_rejected_during_stop_count",
+      "label": "Anchor rejected during stop",
+      "unit": "count",
+      "direction": "neutral",
+      "before": null,
+      "after": 0.0,
+      "delta": null,
+      "relative_change_percent": null,
+      "verdict": "SKIP"
+    },
+    {
+      "key": "anchor_candidate_during_stop_count",
+      "label": "Anchor candidate during stop",
+      "unit": "count",
+      "direction": "neutral",
+      "before": null,
+      "after": 0.0,
+      "delta": null,
+      "relative_change_percent": null,
+      "verdict": "SKIP"
+    },
+    {
+      "key": "anchor_update_count",
+      "label": "Anchor updates",
+      "unit": "count",
+      "direction": "neutral",
+      "before": 15.0,
+      "after": 15.0,
+      "delta": 0.0,
+      "relative_change_percent": 0.0,
+      "verdict": "UNCHANGED"
+    }
+  ]
+}
