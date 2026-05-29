@@ -135,5 +135,38 @@ class AnalyzeRunTest(unittest.TestCase):
         self.assertEqual(peak_checks[0]["status"], "SKIP")
 
 
+    def test_stopping_torque_is_excluded_from_peak_phase_and_reported_as_residual(self):
+        analyzer = load_analyzer()
+        rows = []
+        dt = 0.02
+        lead = 0.20
+        for i in range(80):
+            t = i * dt
+            phase = (2.0 * math.pi * 0.8 * t) % (2.0 * math.pi)
+            signal = math.sin(phase)
+            signed_vel = 2.0 * math.pi * 0.8 * math.cos(phase)
+            state = 3 if i < 50 else 4
+            stop_prob = 0.1 if i < 50 else 0.95
+            right = 3.0 * max(0.0, math.cos(phase + lead)) if i < 50 else 1.5
+            left = 3.0 * max(0.0, -math.cos(phase + lead)) if i < 50 else 0.0
+            if i >= 50:
+                # Deliberately hold a residual Stopping torque at a bad phase; it should
+                # be reported as residual stop torque, not normal gait peak timing error.
+                phase = math.pi
+            rows.append({
+                "MonoTimeS": str(t), "DtS": str(dt), "AssistState": str(state),
+                "StopProbability": str(stop_prob), "Phase": str(phase), "Frequency": "0.8",
+                "FilteredPhaseSignalRad": str(signal), "SignedPhaseVelocityDegS": str(signed_vel * 57.2957795130823),
+                "SpreadDeg": str(abs(signal) * 57.2957795130823), "AoSignalErrorRad": "0",
+                "FreezeRequested": "0", "AllowOutput": "1", "LeftTorqueCmd": str(left), "RightTorqueCmd": str(right),
+            })
+
+        metrics, _, _, _ = analyzer.compute_metrics(rows)
+
+        self.assertLess(metrics["peak_torque_phase_mae_deg"], 15.0)
+        self.assertGreater(metrics["post_stop_peak_torque_nm"], 1.0)
+        self.assertGreater(metrics["post_stop_peak_torque_ratio"], 0.4)
+
+
 if __name__ == "__main__":
     unittest.main()

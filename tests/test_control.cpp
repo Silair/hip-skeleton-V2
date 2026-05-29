@@ -10,6 +10,7 @@
 #include "control/IntentDetector.h"
 #include "control/PhaseEstimator.h"
 #include "control/StopDetector.h"
+#include "control/StopTorqueLimiter.h"
 #include "control/TorqueProfile.h"
 #include "config/ControlConfig.h"
 #include "hardware/JointTypes.h"
@@ -309,12 +310,49 @@ void test_freeze_manager_reset_to_live_clears_natural_stop_freeze() {
     assert(!decision.recovery_active);
 }
 
+
+void test_stop_torque_limiter_moves_torque_toward_zero_without_sign_flip() {
+    exo::ControlConfig config;
+    config.stop.max_stop_torque_rate_nm_s = 40.0;
+    exo::StopTorqueLimiter limiter(config.stop);
+
+    exo::TorqueCommand previous{};
+    previous.left_nm = 4.0;
+    previous.right_nm = 1.0;
+
+    exo::TorqueCommand limited = limiter.update(previous, 0.02);
+
+    assert(std::abs(limited.left_nm - 3.2) < 1e-9);
+    assert(std::abs(limited.right_nm - 0.2) < 1e-9);
+
+    limited = limiter.update(limited, 0.02);
+    assert(std::abs(limited.left_nm - 2.4) < 1e-9);
+    assert(limited.right_nm == 0.0);
+}
+
+void test_stop_torque_limiter_handles_negative_torque_without_overshoot() {
+    exo::ControlConfig config;
+    config.stop.max_stop_torque_rate_nm_s = 30.0;
+    exo::StopTorqueLimiter limiter(config.stop);
+
+    exo::TorqueCommand previous{};
+    previous.left_nm = -0.4;
+    previous.right_nm = -2.0;
+
+    exo::TorqueCommand limited = limiter.update(previous, 0.02);
+
+    assert(limited.left_nm == 0.0);
+    assert(std::abs(limited.right_nm + 1.4) < 1e-9);
+}
+
 } // namespace
 
 int main() {
     test_intent_detector_prefers_motion_over_stop();
     test_intent_detector_prefers_stop_when_quiet();
     test_torque_profile_is_phase_symmetric();
+    test_stop_torque_limiter_moves_torque_toward_zero_without_sign_flip();
+    test_stop_torque_limiter_handles_negative_torque_without_overshoot();
     test_assist_state_machine_reaches_active_after_warmup();
     test_freeze_manager_uses_hysteresis();
     test_freeze_manager_does_not_freeze_before_prior_motion();

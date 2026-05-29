@@ -25,6 +25,7 @@
 #include "control/IntentDetector.h"
 #include "control/PhaseEstimator.h"
 #include "control/StopDetector.h"
+#include "control/StopTorqueLimiter.h"
 #include "control/TorqueProfile.h"
 #include "hardware/JointTypes.h"
 #include "logging/ExoLogger.h"
@@ -287,8 +288,10 @@ int runReplay(const ReplayOptions& options) {
     FreezeManager freeze_manager(config.freeze);
     AssistStateMachine assist_state_machine(config.assist);
     TorqueProfile torque_profile(config.torque);
+    StopTorqueLimiter stop_torque_limiter(config.stop);
 
     FreezeDecision freeze{};
+    TorqueCommand previous_torque{};
     uint64_t loop_seq = 0;
     double previous_time_s = samples.front().time_s;
     int64_t epoch_ms = 0;
@@ -344,7 +347,10 @@ int runReplay(const ReplayOptions& options) {
         assist_inputs.faulted = !state.healthy;
 
         AssistOutput assist = assist_state_machine.update(assist_inputs, controller_dt_s);
-        TorqueCommand torque = torque_profile.compute(phase.phase_rad, phase.frequency_hz, assist.torque_scale, assist.allow_output);
+        TorqueCommand torque = assist.state == AssistState::Stopping
+            ? stop_torque_limiter.update(previous_torque, controller_dt_s)
+            : torque_profile.compute(phase.phase_rad, phase.frequency_hz, assist.torque_scale, assist.allow_output);
+        previous_torque = torque;
 
         logger.write(state, features, phase, intent, freeze, assist, torque);
     }

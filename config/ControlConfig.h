@@ -24,6 +24,7 @@ struct StopConfig {
     double enter_hold_seconds = 0.16;
     double exit_hold_seconds = 0.08;
     double velocity_filter_alpha = 0.25;
+    double max_stop_torque_rate_nm_s = 40.0;
 };
 
 struct FreezeConfig {

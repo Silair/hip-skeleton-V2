@@ -9,6 +9,7 @@
 #include "control/IntentDetector.h"
 #include "control/PhaseEstimator.h"
 #include "control/StopDetector.h"
+#include "control/StopTorqueLimiter.h"
 #include "control/TorqueProfile.h"
 #include "hardware/IExoHardware.h"
 #include "logging/ExoLogger.h"
@@ -35,6 +36,8 @@ private:
     FreezeManager freeze_manager_;
     AssistStateMachine assist_state_machine_;
     TorqueProfile torque_profile_;
+    StopTorqueLimiter stop_torque_limiter_;
+    TorqueCommand previous_torque_{};
     Clock clock_;
 };
 

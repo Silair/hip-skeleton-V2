@@ -27,7 +27,8 @@ ExoController::ExoController(const ControlConfig& config, IExoHardware& hardware
       stop_detector_(config.stop),
       freeze_manager_(config.freeze),
       assist_state_machine_(config.assist),
-      torque_profile_(config.torque) {}
+      torque_profile_(config.torque),
+      stop_torque_limiter_(config.stop) {}
 
 // 一次性上电与日志准备；任一步失败则 run() 不应再调用（main 里会走 shutdown）。
 // 顺序：总线/设备 → 电机使能 → 零位标定（若实现支持跳过则由硬件层决定）→ 打开日志文件。
@@ -104,8 +105,11 @@ bool ExoController::run() {
         assist_inputs.faulted = !state.healthy;
 
         AssistOutput assist = assist_state_machine_.update(assist_inputs, controller_dt_s);
-        // 对称力矩曲线：由相位、估计步频、状态机给出的缩放与 allow 共同决定是否输出非零力矩。
-        TorqueCommand torque = torque_profile_.compute(phase.phase_rad, phase.frequency_hz, assist.torque_scale, assist.allow_output);
+        // 正常助力按相位生成；自然停步期间只撤掉上一帧力矩，不再生成新的相位力矩峰。
+        TorqueCommand torque = assist.state == AssistState::Stopping
+            ? stop_torque_limiter_.update(previous_torque_, controller_dt_s)
+            : torque_profile_.compute(phase.phase_rad, phase.frequency_hz, assist.torque_scale, assist.allow_output);
+        previous_torque_ = torque;
 
         // ---------- 组指令：关节力矩 + 总门控（冻结/故障时禁止驱动输出）----------
         ExoCommand command{};

@@ -277,17 +277,30 @@ def torque_rates(rows: Sequence[Dict[str, str]], key: str) -> List[float]:
     return rates
 
 
+def is_gait_torque_row(row: Dict[str, str]) -> bool:
+    assist_state = int(fnum(row, "AssistState", -1.0))
+    return (
+        assist_state in (2, 3)
+        and fnum(row, "AllowOutput", 0.0) >= 0.5
+        and fnum(row, "FreezeRequested", 0.0) < 0.5
+        and fnum(row, "StopProbability", 0.0) < 0.8
+    )
+
+
 def local_peak_phase_errors(rows: Sequence[Dict[str, str]], lead_angle_rad: float) -> Tuple[List[float], List[float]]:
     left_errors: List[float] = []
     right_errors: List[float] = []
-    left_values = [abs(fnum(r, "LeftTorqueCmd")) for r in rows]
-    right_values = [abs(fnum(r, "RightTorqueCmd")) for r in rows]
-    left_threshold = max(left_values or [0.0]) * 0.25
-    right_threshold = max(right_values or [0.0]) * 0.25
+    gait_rows = [r for r in rows if is_gait_torque_row(r)]
+    left_values = [abs(fnum(r, "LeftTorqueCmd")) for r in gait_rows]
+    right_values = [abs(fnum(r, "RightTorqueCmd")) for r in gait_rows]
+    left_threshold = max(left_values or [0.0]) * 0.50
+    right_threshold = max(right_values or [0.0]) * 0.50
     left_target = (math.pi - lead_angle_rad) % TAU
     right_target = (-lead_angle_rad) % TAU
 
     for i in range(1, len(rows) - 1):
+        if not is_gait_torque_row(rows[i]):
+            continue
         phase = fnum(rows[i], "Phase")
         left = fnum(rows[i], "LeftTorqueCmd")
         right = fnum(rows[i], "RightTorqueCmd")
@@ -318,6 +331,10 @@ def compute_metrics(rows: Sequence[Dict[str, str]], peak_min_spread_deg: float =
     disallow_violations = 0
     stationary_false_assist_s = 0.0
     simultaneous_high = 0
+    post_stop_peak_torque = 0.0
+    max_active_torque = 0.0
+    stop_torque_settle_time_s: Optional[float] = None
+    first_stopping_time_s: Optional[float] = None
     high_threshold = max_abs_torque * 0.25 if max_abs_torque > 0 else float("inf")
 
     for row in rows:
@@ -331,6 +348,16 @@ def compute_metrics(rows: Sequence[Dict[str, str]], peak_min_spread_deg: float =
             disallow_violations += 1
         if fnum(row, "StopProbability") >= 0.8 and torque_active:
             stationary_false_assist_s += dt
+        assist_state = int(fnum(row, "AssistState", -1.0))
+        row_peak = max(left_abs, right_abs)
+        if assist_state in (2, 3):
+            max_active_torque = max(max_active_torque, row_peak)
+        if assist_state == 4:
+            post_stop_peak_torque = max(post_stop_peak_torque, row_peak)
+            if first_stopping_time_s is None:
+                first_stopping_time_s = fnum(row, "MonoTimeS")
+            if stop_torque_settle_time_s is None and row_peak <= torque_epsilon_nm:
+                stop_torque_settle_time_s = fnum(row, "MonoTimeS") - first_stopping_time_s
         if left_abs >= high_threshold and right_abs >= high_threshold:
             simultaneous_high += 1
 
@@ -367,6 +394,9 @@ def compute_metrics(rows: Sequence[Dict[str, str]], peak_min_spread_deg: float =
         "freeze_torque_violation_count": freeze_violations,
         "disallow_output_torque_violation_count": disallow_violations,
         "stationary_false_assist_s": stationary_false_assist_s,
+        "post_stop_peak_torque_nm": post_stop_peak_torque,
+        "post_stop_peak_torque_ratio": None if max_active_torque <= torque_epsilon_nm else post_stop_peak_torque / max_active_torque,
+        "stop_torque_settle_time_s": stop_torque_settle_time_s,
         "simultaneous_high_torque_ratio": 0.0 if not rows else simultaneous_high / len(rows),
         "left_peak_torque_phase_mae_deg": None if not left_peak_errors else mean(left_peak_errors),
         "right_peak_torque_phase_mae_deg": None if not right_peak_errors else mean(right_peak_errors),
