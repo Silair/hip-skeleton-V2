@@ -269,8 +269,56 @@ class AnalyzeRunTest(unittest.TestCase):
 
         self.assertEqual(metrics["anchor_update_count"], 1)
         self.assertEqual(metrics["rejected_anchor_count"], 1)
-        self.assertEqual(metrics["false_anchor_during_stop_count"], 1)
+        self.assertEqual(metrics["anchor_update_during_stop_count"], 0)
+        self.assertEqual(metrics["anchor_rejected_during_stop_count"], 1)
+        self.assertEqual(metrics["anchor_candidate_during_stop_count"], 0)
         self.assertAlmostEqual(metrics["omega_jump_p95_hz"], 0.10)
+
+    def test_stop_context_anchor_metrics_split(self):
+        analyzer = load_analyzer()
+        rows = [
+            {
+                "MonoTimeS": "1.00", "AssistState": "4", "StopProbability": "0.9",
+                "AnchorCandidate": "1", "AnchorRejected": "0", "AnchorFrequencyUpdated": "0",
+            },
+            {
+                "MonoTimeS": "1.02", "AssistState": "4", "StopProbability": "0.9",
+                "AnchorCandidate": "0", "AnchorRejected": "1", "AnchorFrequencyUpdated": "0",
+            },
+            {
+                "MonoTimeS": "1.04", "AssistState": "4", "StopProbability": "0.85",
+                "AnchorCandidate": "0", "AnchorRejected": "0", "AnchorFrequencyUpdated": "1",
+            },
+        ]
+        metrics, _, _, _ = analyzer.compute_metrics(rows)
+        self.assertEqual(metrics["anchor_candidate_during_stop_count"], 1)
+        self.assertEqual(metrics["anchor_rejected_during_stop_count"], 1)
+        self.assertEqual(metrics["anchor_update_during_stop_count"], 1)
+
+    def test_anchor_reject_reason_counts_aggregate(self):
+        analyzer = load_analyzer()
+        rows = [
+            {
+                "MonoTimeS": "0.00", "DtS": "0.02", "AssistState": "3", "StopProbability": "0.1",
+                "Phase": "0", "Frequency": "0.8", "FilteredPhaseSignalRad": "0",
+                "SignedPhaseVelocityDegS": "20", "SpreadDeg": "20", "AoSignalErrorRad": "0",
+                "FreezeRequested": "0", "AllowOutput": "1", "LeftTorqueCmd": "0", "RightTorqueCmd": "0",
+                "AnchorFrequencyUpdated": "0", "AnchorRejected": "1", "AnchorRejectReason": "5",
+            },
+            {
+                "MonoTimeS": "0.02", "DtS": "0.02", "AssistState": "3", "StopProbability": "0.1",
+                "Phase": "0", "Frequency": "0.8", "FilteredPhaseSignalRad": "0",
+                "SignedPhaseVelocityDegS": "-20", "SpreadDeg": "20", "AoSignalErrorRad": "0",
+                "FreezeRequested": "0", "AllowOutput": "1", "LeftTorqueCmd": "0", "RightTorqueCmd": "0",
+                "AnchorFrequencyUpdated": "0", "AnchorRejected": "1", "AnchorRejectReason": "2",
+            },
+        ]
+
+        metrics, _, _, _ = analyzer.compute_metrics(rows)
+
+        self.assertEqual(metrics["rejected_anchor_count"], 2)
+        self.assertEqual(metrics["anchor_reject_reason_counts"]["5"], 1)
+        self.assertEqual(metrics["anchor_reject_reason_counts"]["2"], 1)
 
 
 if __name__ == "__main__":

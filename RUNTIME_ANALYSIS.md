@@ -184,7 +184,21 @@ python3 hs_exoskeleton_v2/tools/compare_metrics.py \
 
 Anchor 时间线：`python3 tools/analyze_anchor_timeline.py <runtime.csv>` 可按 `multi_rate` 各 4s 段统计 `anchor_update_count`。
 
-V2.2+（未做）：小幅 `anchor_phase_gain`、延迟 1 帧极值确认、stride memory、`anchor_frequency_error_hz`。
+### V2.2 Anchor 诊断、延迟确认与 Tracking 延迟频率（已实现）
+
+第一版 V2.2 聚焦 **诊断 + 抗噪 + 低频起步覆盖**，暂不默认开启相位校正：
+
+- `AnchorRejectReason` 枚举写入 `PhaseEstimate::anchor_reject_reason` 与 runtime CSV 列 `AnchorRejectReason`。
+- `analyze_run.py` 输出 `anchor_reject_reason_counts`；`analyze_anchor_timeline.py` 按 `multi_rate` 各 4s 段输出 `segment_diagnostics`（候选/检测/更新/拒绝原因）。
+- `anchor_confirm_delay_frames = 1`（50 Hz 下约 20 ms）：过零候选延迟 1 帧确认；失败记 `ConfirmFailed`。
+- `enable_tracking_deferred_frequency`：Tracking 段测得可靠半周期后缓存，进入 Ramp/Active 首帧应用一次（缓解 0.6 Hz 段仅 Tracking 时 `anchor_update_count=0`）。
+- CSV 列 `AnchorCandidate`：记录延迟确认前的可靠过零候选。
+
+停步验收拆分为：`anchor_update_during_stop_count`（硬门槛 = 0）、`anchor_rejected_during_stop_count`、`anchor_candidate_during_stop_count`（信息性）。勿用旧版混合 `false_anchor_during_stop_count` 判断安全性。
+
+0.6 Hz 起步：`python3 tools/startup_signal_diagnostics.py <multi_rate.csv>`。
+
+仍属 V2.2.1+ / 后续：startup frequency prior；V2.3 stride segmentation 日志版；**不要**马上上 `anchor_phase_gain` 或完整双层 AO。
 
 ### 合入评审结论（V2.1 第一版）
 

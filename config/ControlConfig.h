@@ -83,6 +83,8 @@ struct PhaseConfig {
     double anchor_max_frequency_step_hz = 0.20;
     double max_omega_rate_rad_s2 = 8.0;
     double anchor_update_disable_stop_probability = 0.65;
+    int anchor_confirm_delay_frames = 1;
+    bool enable_tracking_deferred_frequency = true;
     int reacquire_anchor_warmup_count = 2;
 };
 

@@ -19,6 +19,20 @@ ASSIST_STATE_NAMES = {
     6: "Fault",
 }
 
+ANCHOR_REJECT_REASON_NAMES = {
+    0: "None",
+    1: "UnreliableSignal",
+    2: "ConfirmFailed",
+    3: "Refractory",
+    4: "StopIntent",
+    5: "AssistState",
+    6: "Warmup",
+    7: "Interval",
+    8: "AnchorType",
+    9: "LowConfidence",
+    10: "FrequencyRange",
+}
+
 MULTI_RATE_SEGMENTS = [
     (0.0, 4.0, 0.6),
     (4.0, 8.0, 1.2),
@@ -47,19 +61,47 @@ def segment_label(t_s: float) -> str:
     return "out_of_range"
 
 
+def empty_segment_stats() -> Dict[str, object]:
+    return {
+        "anchor_candidate_count": 0,
+        "anchor_detected_count": 0,
+        "anchor_update_count": 0,
+        "anchor_reject_reason_counts": {},
+    }
+
+
 def summarize(path: Path) -> Dict[str, object]:
     rows = load_rows(path)
     events: List[Dict[str, object]] = []
     segment_updates: Dict[str, int] = {f"{hz:.2f}Hz": 0 for _, _, hz in MULTI_RATE_SEGMENTS}
+    segment_stats: Dict[str, Dict[str, object]] = {
+        f"{hz:.2f}Hz": empty_segment_stats() for _, _, hz in MULTI_RATE_SEGMENTS
+    }
 
     for row in rows:
+        t_s = fnum(row, "MonoTimeS")
+        seg = segment_label(t_s)
+        if seg not in segment_stats:
+            continue
+
+        stats = segment_stats[seg]
+        if fnum(row, "AnchorCandidate", 0.0) >= 0.5:
+            stats["anchor_candidate_count"] = int(stats["anchor_candidate_count"]) + 1
+        if fnum(row, "AnchorDetected", 0.0) >= 0.5:
+            stats["anchor_detected_count"] = int(stats["anchor_detected_count"]) + 1
+        if fnum(row, "AnchorRejected", 0.0) >= 0.5:
+            reason = int(fnum(row, "AnchorRejectReason", 0.0))
+            reason_name = ANCHOR_REJECT_REASON_NAMES.get(reason, str(reason))
+            reject_counts = stats["anchor_reject_reason_counts"]
+            assert isinstance(reject_counts, dict)
+            reject_counts[reason_name] = reject_counts.get(reason_name, 0) + 1
+
         if fnum(row, "AnchorFrequencyUpdated", 0.0) < 0.5:
             continue
-        t_s = fnum(row, "MonoTimeS")
         assist = int(fnum(row, "AssistState", -1))
-        seg = segment_label(t_s)
         if seg in segment_updates:
             segment_updates[seg] += 1
+            stats["anchor_update_count"] = int(stats["anchor_update_count"]) + 1
         events.append(
             {
                 "time_s": t_s,
@@ -69,9 +111,18 @@ def summarize(path: Path) -> Dict[str, object]:
                 "omega_correction_hz": fnum(row, "OmegaCorrectionHz"),
                 "frequency_hz": fnum(row, "Frequency"),
                 "anchor_confidence": fnum(row, "AnchorConfidence"),
+                "anchor_reject_reason": int(fnum(row, "AnchorRejectReason", 0.0)),
                 "segment": seg,
             }
         )
+
+    reject_counts: Dict[str, int] = {}
+    for row in rows:
+        if fnum(row, "AnchorRejected", 0.0) < 0.5:
+            continue
+        reason = int(fnum(row, "AnchorRejectReason", 0.0))
+        reason_name = ANCHOR_REJECT_REASON_NAMES.get(reason, str(reason))
+        reject_counts[reason_name] = reject_counts.get(reason_name, 0) + 1
 
     edge_updates = [
         e
@@ -85,6 +136,8 @@ def summarize(path: Path) -> Dict[str, object]:
         "log_path": str(path),
         "anchor_update_count": len(events),
         "updates_by_segment": segment_updates,
+        "segment_diagnostics": segment_stats,
+        "anchor_reject_reason_counts": reject_counts,
         "events": events,
         "edge_or_stop_context_updates": edge_updates,
     }
@@ -100,6 +153,17 @@ def main() -> None:
     print(f"log: {summary['log_path']}")
     print(f"anchor updates: {summary['anchor_update_count']}")
     print("by segment:", summary["updates_by_segment"])
+    if summary.get("anchor_reject_reason_counts"):
+        print("reject reasons:", summary["anchor_reject_reason_counts"])
+    if summary.get("segment_diagnostics"):
+        print("segment diagnostics:")
+        for seg, stats in summary["segment_diagnostics"].items():
+            print(
+                f"  {seg}: candidates={stats['anchor_candidate_count']} "
+                f"detected={stats['anchor_detected_count']} "
+                f"updates={stats['anchor_update_count']} "
+                f"rejects={stats['anchor_reject_reason_counts']}"
+            )
     if summary["edge_or_stop_context_updates"]:
         print("edge/stop-context updates:")
         for event in summary["edge_or_stop_context_updates"]:

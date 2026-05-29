@@ -11,6 +11,20 @@ namespace exo {
 struct GaitFeatures;
 struct PhaseEstimate;
 
+enum class AnchorRejectReason : int {
+    None = 0,
+    UnreliableSignal = 1,
+    ConfirmFailed = 2,
+    Refractory = 3,
+    StopIntent = 4,
+    AssistState = 5,
+    Warmup = 6,
+    Interval = 7,
+    AnchorType = 8,
+    LowConfidence = 9,
+    FrequencyRange = 10,
+};
+
 class PhaseEstimator {
 public:
     explicit PhaseEstimator(const PhaseConfig& config);
@@ -27,13 +41,47 @@ private:
         Valley,
     };
 
+    struct AnchorEventContext {
+        const GaitFeatures& features;
+        double dt_s;
+        AssistState assist_state;
+        double stop_probability;
+        double prev_velocity_deg_s;
+        double curr_velocity_deg_s;
+        double previous_velocity_abs_deg_s;
+        double current_velocity_abs_deg_s;
+        bool tracking_enabled;
+    };
+
     static double wrapAngle(double angle_rad);
     static double clamp01(double value);
     static double moveToward(double current, double target, double max_step);
     static double anchorFrequencyGainForState(const PhaseConfig& config, AssistState assist_state);
+    static bool confirmPendingAnchor(const PhaseConfig& config, AnchorType type, double curr_velocity_deg_s, double spread_deg);
 
     void applyRateLimitedOmega(double dt_s);
     void clampOmegaToConfigLimits();
+    struct AnchorFrequencyMeasurement {
+        double measured_frequency_hz = 0.0;
+        double confidence = 0.0;
+        bool ready = false;
+        AnchorRejectReason rejection = AnchorRejectReason::None;
+    };
+
+    AnchorFrequencyMeasurement measureAnchorFrequency(const AnchorEventContext& ctx,
+                                                      AnchorType anchor_type) const;
+    bool applyAnchorFrequencyCorrection(const AnchorEventContext& ctx,
+                                        PhaseEstimate& estimate,
+                                        double omega_before_rad_s,
+                                        double measured_frequency_hz,
+                                        double confidence);
+    void tryApplyDeferredFrequencyCorrection(const AnchorEventContext& ctx,
+                                             PhaseEstimate& estimate,
+                                             double omega_before_rad_s);
+    void processAnchorEvent(const AnchorEventContext& ctx,
+                            AnchorType anchor_type,
+                            PhaseEstimate& estimate,
+                            double omega_before_rad_s);
 
     PhaseConfig config_;
     MultiHarmonicAO oscillator_;
@@ -47,6 +95,13 @@ private:
     bool previous_tracking_enabled_ = true;
     double omega_target_rad_s_ = 0.0;
     bool omega_target_tracking_active_ = false;
+    bool has_pending_anchor_ = false;
+    AnchorType pending_anchor_type_ = AnchorType::Peak;
+    double pending_prev_velocity_deg_s_ = 0.0;
+    double pending_peak_velocity_abs_deg_s_ = 0.0;
+    bool has_deferred_frequency_correction_ = false;
+    double deferred_measured_frequency_hz_ = 0.0;
+    double deferred_confidence_ = 0.0;
     double now_s_ = 0.0;
 };
 

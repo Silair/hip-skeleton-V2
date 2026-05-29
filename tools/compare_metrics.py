@@ -30,7 +30,9 @@ METRIC_SPECS = [
     ("peak_torque_phase_mae_deg", "Peak torque phase MAE", "lower_is_better", "deg"),
     ("omega_jump_p95_hz", "Omega jump P95", "lower_is_better", "Hz"),
     ("omega_jump_max_hz", "Omega jump max", "lower_is_better", "Hz"),
-    ("false_anchor_during_stop_count", "False anchor during stop", "lower_is_better", "count"),
+    ("anchor_update_during_stop_count", "Anchor update during stop", "lower_is_better", "count"),
+    ("anchor_rejected_during_stop_count", "Anchor rejected during stop", "neutral", "count"),
+    ("anchor_candidate_during_stop_count", "Anchor candidate during stop", "neutral", "count"),
     ("anchor_update_count", "Anchor updates", "neutral", "count"),
 ]
 

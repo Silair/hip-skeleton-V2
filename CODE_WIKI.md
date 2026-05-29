@@ -143,7 +143,9 @@ app/main.cpp
 - `AssistState::Active`/`Ramp` 允许频率更新；`Tracking` 只累计 anchor；`Stopping`/`Frozen`/`Transparent`/`Fault` 禁止；`tracking_enabled` 关闭时重置 anchor 状态机。
 - V2.1 不做锚点相位校正（`anchor_phase_gain = 0`）；输出相位为 `wrapAngle(phi_GP)`。
 
-输出：`PhaseEstimate`，含 `phase_rad`、`frequency_hz`、`amplitude_rad`、`valid`、`anchor_detected`，以及 `anchor_frequency_updated`、`anchor_rejected`、`anchor_confidence`、`omega_correction_hz` 等调试字段。
+输出：`PhaseEstimate`，含 `phase_rad`、`frequency_hz`、`amplitude_rad`、`valid`、`anchor_detected`，以及 `anchor_frequency_updated`、`anchor_rejected`、`anchor_reject_reason`（V2.2）、`anchor_confidence`、`omega_correction_hz` 等调试字段。
+
+V2.2：`anchor_confirm_delay_frames` 延迟 1 帧确认峰/谷；`AnchorRejectReason` 与 `AnchorCandidate` 日志；Tracking 可靠 anchor 可 `enable_tracking_deferred_frequency` 延迟到 Ramp/Active 再校正频率。
 
 ### 5.6 意图检测：`control/IntentDetector.h/.cpp`
 

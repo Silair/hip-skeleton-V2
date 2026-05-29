@@ -44,6 +44,19 @@ double PhaseEstimator::anchorFrequencyGainForState(const PhaseConfig& config, As
     }
 }
 
+bool PhaseEstimator::confirmPendingAnchor(const PhaseConfig& config,
+                                          AnchorType type,
+                                          double curr_velocity_deg_s,
+                                          double spread_deg) {
+    if (spread_deg <= config.anchor_min_spread_deg) {
+        return false;
+    }
+    if (type == AnchorType::Peak) {
+        return curr_velocity_deg_s <= -config.anchor_min_velocity_deg_s;
+    }
+    return curr_velocity_deg_s >= config.anchor_min_velocity_deg_s;
+}
+
 void PhaseEstimator::clampOmegaToConfigLimits() {
     const double min_omega_rad_s = config_.ao_min_frequency_hz * 2.0 * M_PI;
     const double max_omega_rad_s = config_.ao_max_frequency_hz * 2.0 * M_PI;
@@ -57,6 +70,191 @@ void PhaseEstimator::applyRateLimitedOmega(double dt_s) {
     clampOmegaToConfigLimits();
 }
 
+PhaseEstimator::AnchorFrequencyMeasurement PhaseEstimator::measureAnchorFrequency(
+    const AnchorEventContext& ctx,
+    AnchorType anchor_type) const {
+    AnchorFrequencyMeasurement measurement{};
+    if (!has_frequency_anchor_) {
+        return measurement;
+    }
+
+    const double frequency_hz = std::abs(oscillator_.omega) / (2.0 * M_PI);
+    const double dt_anchor_s = now_s_ - last_frequency_anchor_time_s_;
+    const bool warmup_done =
+        reliable_anchor_count_since_tracking_enable_ > config_.reacquire_anchor_warmup_count;
+    const bool interval_ok =
+        dt_anchor_s >= config_.anchor_min_interval_s && dt_anchor_s <= config_.anchor_max_interval_s;
+    const bool refractory_ok = dt_anchor_s >= config_.anchor_refractory_s;
+    const bool type_ok = last_frequency_anchor_type_ != anchor_type;
+
+    if (!warmup_done) {
+        measurement.rejection = AnchorRejectReason::Warmup;
+        return measurement;
+    }
+    if (!interval_ok) {
+        measurement.rejection = AnchorRejectReason::Interval;
+        return measurement;
+    }
+    if (!refractory_ok) {
+        measurement.rejection = AnchorRejectReason::Refractory;
+        return measurement;
+    }
+    if (!type_ok) {
+        measurement.rejection = AnchorRejectReason::AnchorType;
+        return measurement;
+    }
+
+    measurement.measured_frequency_hz = 0.5 / std::max(dt_anchor_s, 1e-6);
+    const double predicted_half_period_s = 0.5 / std::max(frequency_hz, 1e-6);
+    const double interval_ratio = dt_anchor_s / std::max(predicted_half_period_s, 1e-6);
+    const double interval_score = clamp01(1.0 - std::abs(interval_ratio - 1.0) / 0.4);
+    const double amplitude_score = clamp01(
+        (ctx.features.spread_deg - config_.anchor_min_spread_deg) /
+        std::max(config_.anchor_spread_margin_deg, 1e-6));
+    const double velocity_score = clamp01(
+        std::min(ctx.previous_velocity_abs_deg_s, ctx.current_velocity_abs_deg_s) /
+        std::max(config_.anchor_velocity_reference_deg_s, 1e-6));
+    measurement.confidence = 0.4 * interval_score + 0.3 * amplitude_score + 0.3 * velocity_score;
+
+    if (measurement.measured_frequency_hz < config_.anchor_frequency_min_hz ||
+        measurement.measured_frequency_hz > config_.anchor_frequency_max_hz) {
+        measurement.rejection = AnchorRejectReason::FrequencyRange;
+        return measurement;
+    }
+
+    if (measurement.confidence < config_.anchor_min_confidence) {
+        measurement.rejection = AnchorRejectReason::LowConfidence;
+        return measurement;
+    }
+
+    measurement.ready = true;
+    return measurement;
+}
+
+bool PhaseEstimator::applyAnchorFrequencyCorrection(const AnchorEventContext& ctx,
+                                                    PhaseEstimate& estimate,
+                                                    double omega_before_rad_s,
+                                                    double measured_frequency_hz,
+                                                    double confidence) {
+    const double frequency_hz = std::abs(oscillator_.omega) / (2.0 * M_PI);
+    const double state_frequency_gain = anchorFrequencyGainForState(config_, ctx.assist_state);
+    const double effective_gain = state_frequency_gain * confidence;
+    if (effective_gain <= 1e-6) {
+        return false;
+    }
+
+    estimate.anchor_measured_frequency_hz = measured_frequency_hz;
+    estimate.anchor_confidence = confidence;
+
+    const double current_frequency_hz =
+        std::clamp(frequency_hz, config_.ao_min_frequency_hz, config_.ao_max_frequency_hz);
+    double limited_frequency_hz = std::clamp(
+        measured_frequency_hz, config_.anchor_frequency_min_hz, config_.anchor_frequency_max_hz);
+    limited_frequency_hz = std::clamp(
+        limited_frequency_hz,
+        current_frequency_hz / std::max(config_.anchor_max_frequency_ratio, 1.0),
+        current_frequency_hz * std::max(config_.anchor_max_frequency_ratio, 1.0));
+    const double corrected_frequency_hz = moveToward(
+        current_frequency_hz, limited_frequency_hz, config_.anchor_max_frequency_step_hz);
+    const double target_frequency_hz =
+        (1.0 - effective_gain) * current_frequency_hz + effective_gain * corrected_frequency_hz;
+    omega_target_rad_s_ = target_frequency_hz * 2.0 * M_PI;
+    omega_target_tracking_active_ = true;
+    applyRateLimitedOmega(ctx.dt_s);
+    estimate.omega_correction_hz = (oscillator_.omega - omega_before_rad_s) / (2.0 * M_PI);
+    estimate.anchor_frequency_updated = std::abs(oscillator_.omega - omega_before_rad_s) > 1e-9;
+    return estimate.anchor_frequency_updated;
+}
+
+void PhaseEstimator::tryApplyDeferredFrequencyCorrection(const AnchorEventContext& ctx,
+                                                         PhaseEstimate& estimate,
+                                                         double omega_before_rad_s) {
+    if (!config_.enable_tracking_deferred_frequency || !has_deferred_frequency_correction_) {
+        return;
+    }
+    if (!config_.enable_anchor_frequency_update || !ctx.tracking_enabled) {
+        return;
+    }
+    if (ctx.stop_probability >= config_.anchor_update_disable_stop_probability) {
+        has_deferred_frequency_correction_ = false;
+        return;
+    }
+    if (ctx.assist_state != AssistState::Active && ctx.assist_state != AssistState::Ramp) {
+        return;
+    }
+
+    if (applyAnchorFrequencyCorrection(
+            ctx, estimate, omega_before_rad_s, deferred_measured_frequency_hz_, deferred_confidence_)) {
+        estimate.anchor_detected = true;
+        estimate.anchor_reject_reason = static_cast<int>(AnchorRejectReason::None);
+    }
+    has_deferred_frequency_correction_ = false;
+}
+
+void PhaseEstimator::processAnchorEvent(const AnchorEventContext& ctx,
+                                        AnchorType anchor_type,
+                                        PhaseEstimate& estimate,
+                                        double omega_before_rad_s) {
+    estimate.anchor_detected = true;
+    estimate.anchor_reject_reason = static_cast<int>(AnchorRejectReason::None);
+    last_anchor_time_s_ = now_s_;
+    reliable_anchor_count_since_tracking_enable_ += 1;
+
+    const bool stop_intent_blocks_update =
+        ctx.stop_probability >= config_.anchor_update_disable_stop_probability;
+    const bool allow_frequency_update_state =
+        !stop_intent_blocks_update &&
+        (ctx.assist_state == AssistState::Active || ctx.assist_state == AssistState::Ramp);
+
+    if (!config_.enable_anchor_frequency_update || !ctx.tracking_enabled) {
+        last_frequency_anchor_time_s_ = now_s_;
+        last_frequency_anchor_type_ = anchor_type;
+        has_frequency_anchor_ = true;
+        return;
+    }
+
+    if (stop_intent_blocks_update) {
+        estimate.anchor_rejected = true;
+        estimate.anchor_reject_reason = static_cast<int>(AnchorRejectReason::StopIntent);
+        has_deferred_frequency_correction_ = false;
+    } else if (!has_frequency_anchor_) {
+        // First anchor: establish timing only.
+    } else {
+        const AnchorFrequencyMeasurement measurement = measureAnchorFrequency(ctx, anchor_type);
+        if (!measurement.ready) {
+            estimate.anchor_rejected = true;
+            estimate.anchor_reject_reason = static_cast<int>(measurement.rejection);
+            if (measurement.rejection != AnchorRejectReason::None) {
+                estimate.anchor_measured_frequency_hz = measurement.measured_frequency_hz;
+                estimate.anchor_confidence = measurement.confidence;
+            }
+        } else if (!allow_frequency_update_state) {
+            estimate.anchor_measured_frequency_hz = measurement.measured_frequency_hz;
+            estimate.anchor_confidence = measurement.confidence;
+            if (config_.enable_tracking_deferred_frequency &&
+                ctx.assist_state == AssistState::Tracking) {
+                deferred_measured_frequency_hz_ = measurement.measured_frequency_hz;
+                deferred_confidence_ = measurement.confidence;
+                has_deferred_frequency_correction_ = true;
+            }
+            estimate.anchor_rejected = true;
+            estimate.anchor_reject_reason = static_cast<int>(AnchorRejectReason::AssistState);
+        } else if (!applyAnchorFrequencyCorrection(
+                       ctx,
+                       estimate,
+                       omega_before_rad_s,
+                       measurement.measured_frequency_hz,
+                       measurement.confidence)) {
+            estimate.anchor_rejected = true;
+            estimate.anchor_reject_reason = static_cast<int>(AnchorRejectReason::LowConfidence);
+        }
+    }
+
+    last_frequency_anchor_time_s_ = now_s_;
+    last_frequency_anchor_type_ = anchor_type;
+    has_frequency_anchor_ = true;
+}
+
 PhaseEstimate PhaseEstimator::update(const GaitFeatures& features,
                                      double dt_s,
                                      bool tracking_enabled,
@@ -67,6 +265,8 @@ PhaseEstimate PhaseEstimator::update(const GaitFeatures& features,
         reliable_anchor_count_since_tracking_enable_ = 0;
         has_frequency_anchor_ = false;
         omega_target_tracking_active_ = false;
+        has_pending_anchor_ = false;
+        has_deferred_frequency_correction_ = false;
     }
     previous_tracking_enabled_ = tracking_enabled;
 
@@ -102,89 +302,56 @@ PhaseEstimate PhaseEstimator::update(const GaitFeatures& features,
 
     last_phase_velocity_deg_s_ = curr_velocity_deg_s;
 
-    bool anchor_detected = false;
-    bool anchor_frequency_updated = false;
-    bool anchor_rejected = false;
-    double anchor_measured_frequency_hz = 0.0;
-    double anchor_confidence = 0.0;
-    double omega_correction_hz = 0.0;
-    const double frequency_hz = std::abs(oscillator_.omega) / (2.0 * M_PI);
+    PhaseEstimate estimate{};
     const double omega_before_rad_s = oscillator_.omega;
-
     const bool anchor_spacing_ok = (now_s_ - last_anchor_time_s_) > config_.anchor_refractory_s;
-    const bool anchor_reliable = reliable_peak || reliable_valley;
+    const bool anchor_candidate = reliable_peak || reliable_valley;
     const bool anchor_signal_ok = anchor_spacing_ok && tracking_enabled;
-    const bool stop_intent_blocks_update =
-        stop_probability >= config_.anchor_update_disable_stop_probability;
-    const bool allow_frequency_update_state =
-        !stop_intent_blocks_update &&
-        (assist_state == AssistState::Active || assist_state == AssistState::Ramp);
 
-    if (anchor_reliable && anchor_signal_ok) {
-        anchor_detected = true;
-        last_anchor_time_s_ = now_s_;
-        reliable_anchor_count_since_tracking_enable_ += 1;
+    const AnchorEventContext ctx{
+        features,
+        dt_s,
+        assist_state,
+        stop_probability,
+        prev_velocity_deg_s,
+        curr_velocity_deg_s,
+        previous_velocity_abs_deg_s,
+        current_velocity_abs_deg_s,
+        tracking_enabled,
+    };
 
-        const AnchorType current_anchor_type = reliable_peak ? AnchorType::Peak : AnchorType::Valley;
-        const double dt_anchor_s = now_s_ - last_frequency_anchor_time_s_;
-        const bool warmup_done =
-            reliable_anchor_count_since_tracking_enable_ > config_.reacquire_anchor_warmup_count;
-        const bool interval_ok =
-            dt_anchor_s >= config_.anchor_min_interval_s && dt_anchor_s <= config_.anchor_max_interval_s;
-        const bool refractory_ok = dt_anchor_s >= config_.anchor_refractory_s;
-        const bool type_ok = !has_frequency_anchor_ || last_frequency_anchor_type_ != current_anchor_type;
+    tryApplyDeferredFrequencyCorrection(ctx, estimate, omega_before_rad_s);
 
-        if (config_.enable_anchor_frequency_update && allow_frequency_update_state && tracking_enabled &&
-            has_frequency_anchor_ && warmup_done && interval_ok && refractory_ok && type_ok) {
-            anchor_measured_frequency_hz = 0.5 / std::max(dt_anchor_s, 1e-6);
-            const double predicted_half_period_s = 0.5 / std::max(frequency_hz, 1e-6);
-            const double interval_ratio = dt_anchor_s / std::max(predicted_half_period_s, 1e-6);
-            const double interval_score = clamp01(1.0 - std::abs(interval_ratio - 1.0) / 0.4);
-            const double amplitude_score = clamp01(
-                (features.spread_deg - config_.anchor_min_spread_deg) /
-                std::max(config_.anchor_spread_margin_deg, 1e-6));
-            const double velocity_score = clamp01(
-                std::min(previous_velocity_abs_deg_s, current_velocity_abs_deg_s) /
-                std::max(config_.anchor_velocity_reference_deg_s, 1e-6));
-            anchor_confidence = 0.4 * interval_score + 0.3 * amplitude_score + 0.3 * velocity_score;
-
-            const double state_frequency_gain = anchorFrequencyGainForState(config_, assist_state);
-            const double effective_gain = state_frequency_gain * anchor_confidence;
-
-            if (anchor_measured_frequency_hz >= config_.anchor_frequency_min_hz &&
-                anchor_measured_frequency_hz <= config_.anchor_frequency_max_hz &&
-                anchor_confidence >= config_.anchor_min_confidence && effective_gain > 1e-6) {
-                const double current_frequency_hz = std::clamp(
-                    frequency_hz, config_.ao_min_frequency_hz, config_.ao_max_frequency_hz);
-                double limited_frequency_hz = std::clamp(
-                    anchor_measured_frequency_hz,
-                    config_.anchor_frequency_min_hz,
-                    config_.anchor_frequency_max_hz);
-                limited_frequency_hz = std::clamp(
-                    limited_frequency_hz,
-                    current_frequency_hz / std::max(config_.anchor_max_frequency_ratio, 1.0),
-                    current_frequency_hz * std::max(config_.anchor_max_frequency_ratio, 1.0));
-                const double corrected_frequency_hz = moveToward(
-                    current_frequency_hz, limited_frequency_hz, config_.anchor_max_frequency_step_hz);
-                const double target_frequency_hz =
-                    (1.0 - effective_gain) * current_frequency_hz + effective_gain * corrected_frequency_hz;
-                omega_target_rad_s_ = target_frequency_hz * 2.0 * M_PI;
-                omega_target_tracking_active_ = true;
-                applyRateLimitedOmega(dt_s);
-                omega_correction_hz = (oscillator_.omega - omega_before_rad_s) / (2.0 * M_PI);
-                anchor_frequency_updated = std::abs(oscillator_.omega - omega_before_rad_s) > 1e-9;
-            } else {
-                anchor_rejected = true;
-            }
-        } else if (config_.enable_anchor_frequency_update && has_frequency_anchor_ && anchor_reliable) {
-            anchor_rejected = true;
+    if (config_.anchor_confirm_delay_frames > 0 && has_pending_anchor_) {
+        if (confirmPendingAnchor(config_, pending_anchor_type_, curr_velocity_deg_s, features.spread_deg)) {
+            AnchorEventContext confirm_ctx = ctx;
+            confirm_ctx.prev_velocity_deg_s = pending_prev_velocity_deg_s_;
+            confirm_ctx.previous_velocity_abs_deg_s = std::abs(pending_prev_velocity_deg_s_);
+            confirm_ctx.current_velocity_abs_deg_s = pending_peak_velocity_abs_deg_s_;
+            processAnchorEvent(confirm_ctx, pending_anchor_type_, estimate, omega_before_rad_s);
+        } else {
+            estimate.anchor_rejected = true;
+            estimate.anchor_reject_reason = static_cast<int>(AnchorRejectReason::ConfirmFailed);
         }
+        has_pending_anchor_ = false;
+    }
 
-        last_frequency_anchor_time_s_ = now_s_;
-        last_frequency_anchor_type_ = current_anchor_type;
-        has_frequency_anchor_ = true;
-    } else if (reliable_peak || reliable_valley) {
-        anchor_rejected = true;
+    if (!estimate.anchor_detected && config_.anchor_confirm_delay_frames > 0 && anchor_candidate && anchor_signal_ok) {
+        estimate.anchor_candidate = true;
+        has_pending_anchor_ = true;
+        pending_anchor_type_ = reliable_peak ? AnchorType::Peak : AnchorType::Valley;
+        pending_prev_velocity_deg_s_ = prev_velocity_deg_s;
+        pending_peak_velocity_abs_deg_s_ = peak_velocity_abs_deg_s;
+    } else if (!estimate.anchor_detected && anchor_candidate && anchor_signal_ok) {
+        estimate.anchor_candidate = true;
+        const AnchorType anchor_type = reliable_peak ? AnchorType::Peak : AnchorType::Valley;
+        processAnchorEvent(ctx, anchor_type, estimate, omega_before_rad_s);
+    } else if (anchor_candidate) {
+        estimate.anchor_rejected = true;
+        estimate.anchor_reject_reason = static_cast<int>(AnchorRejectReason::Refractory);
+    } else if (positive_peak || negative_peak) {
+        estimate.anchor_rejected = true;
+        estimate.anchor_reject_reason = static_cast<int>(AnchorRejectReason::UnreliableSignal);
     }
 
     if (tracking_enabled && omega_target_tracking_active_) {
@@ -196,19 +363,12 @@ PhaseEstimate PhaseEstimator::update(const GaitFeatures& features,
         }
     }
 
-    PhaseEstimate estimate{};
     estimate.phase_rad = wrapAngle(oscillator_.phi_GP);
     estimate.frequency_hz = std::abs(oscillator_.omega) / (2.0 * M_PI);
     estimate.amplitude_rad = std::abs(oscillator_.alpha[1]);
     estimate.ao_signal_estimate_rad = oscillator_.theta_IL_hat;
     estimate.ao_signal_error_rad = oscillator_.error_F;
     estimate.valid = estimate.frequency_hz >= config_.ao_min_frequency_hz * 0.5;
-    estimate.anchor_detected = anchor_detected;
-    estimate.anchor_frequency_updated = anchor_frequency_updated;
-    estimate.anchor_rejected = anchor_rejected;
-    estimate.anchor_measured_frequency_hz = anchor_measured_frequency_hz;
-    estimate.anchor_confidence = anchor_confidence;
-    estimate.omega_correction_hz = omega_correction_hz;
     return estimate;
 }
 

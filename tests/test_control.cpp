@@ -200,6 +200,98 @@ void test_phase_estimator_no_anchor_frequency_update_when_stop_probability_high(
     assert(!estimate.anchor_frequency_updated);
 }
 
+void test_phase_estimator_delayed_confirm_rejects_single_frame_spike() {
+    exo::ControlConfig config;
+    config.phase.anchor_confirm_delay_frames = 1;
+    config.phase.anchor_refractory_s = 0.0;
+    exo::PhaseEstimator estimator(config.phase);
+    exo::GaitFeatures features{};
+
+    features.filtered_phase_signal_rad = 0.0;
+    features.spread_deg = 20.0;
+    features.signed_phase_velocity_deg_s = 20.0;
+    estimator.update(features, 0.02, true, exo::AssistState::Active, 0.0);
+
+    features.signed_phase_velocity_deg_s = -20.0;
+    const exo::PhaseEstimate pending = estimator.update(features, 0.02, true, exo::AssistState::Active, 0.0);
+    assert(!pending.anchor_detected);
+
+    features.signed_phase_velocity_deg_s = 20.0;
+    const exo::PhaseEstimate failed = estimator.update(features, 0.02, true, exo::AssistState::Active, 0.0);
+    assert(failed.anchor_rejected);
+    assert(failed.anchor_reject_reason == static_cast<int>(exo::AnchorRejectReason::ConfirmFailed));
+}
+
+void test_phase_estimator_applies_deferred_frequency_on_ramp_after_tracking() {
+    exo::ControlConfig config;
+    config.phase.anchor_confirm_delay_frames = 0;
+    config.phase.anchor_refractory_s = 0.0;
+    config.phase.reacquire_anchor_warmup_count = 0;
+    config.phase.enable_tracking_deferred_frequency = true;
+    exo::PhaseEstimator estimator(config.phase);
+    exo::GaitFeatures features{};
+
+    const double dt = 0.02;
+    for (int i = 0; i < 120; ++i) {
+        fill_sine_features(features, i * dt, 0.6);
+        estimator.update(features, dt, true, exo::AssistState::Tracking, 0.0);
+    }
+
+    bool saw_tracking_reject = false;
+    for (int i = 120; i < 220; ++i) {
+        fill_sine_features(features, i * dt, 0.6);
+        const exo::PhaseEstimate estimate =
+            estimator.update(features, dt, true, exo::AssistState::Tracking, 0.0);
+        if (estimate.anchor_rejected &&
+            estimate.anchor_reject_reason == static_cast<int>(exo::AnchorRejectReason::AssistState) &&
+            estimate.anchor_confidence >= config.phase.anchor_min_confidence) {
+            saw_tracking_reject = true;
+        }
+    }
+    assert(saw_tracking_reject);
+
+    bool saw_deferred_update = false;
+    for (int i = 220; i < 240; ++i) {
+        fill_sine_features(features, i * dt, 0.6);
+        const exo::PhaseEstimate estimate =
+            estimator.update(features, dt, true, exo::AssistState::Ramp, 0.0);
+        if (estimate.anchor_frequency_updated) {
+            saw_deferred_update = true;
+            break;
+        }
+    }
+    assert(saw_deferred_update);
+}
+
+void test_phase_estimator_reports_low_confidence_reject_reason() {
+    exo::ControlConfig config;
+    config.phase.anchor_confirm_delay_frames = 0;
+    config.phase.anchor_refractory_s = 0.0;
+    config.phase.reacquire_anchor_warmup_count = 0;
+    config.phase.anchor_min_confidence = 0.99;
+    exo::PhaseEstimator estimator(config.phase);
+    exo::GaitFeatures features{};
+
+    const double dt = 0.02;
+    for (int i = 0; i < 80; ++i) {
+        fill_sine_features(features, i * dt, 0.9);
+        estimator.update(features, dt, true, exo::AssistState::Active, 0.0);
+    }
+
+    bool saw_low_confidence = false;
+    for (int i = 80; i < 200; ++i) {
+        fill_sine_features(features, i * dt, 0.9);
+        const exo::PhaseEstimate estimate =
+            estimator.update(features, dt, true, exo::AssistState::Active, 0.0);
+        if (estimate.anchor_rejected &&
+            estimate.anchor_reject_reason == static_cast<int>(exo::AnchorRejectReason::LowConfidence)) {
+            saw_low_confidence = true;
+            break;
+        }
+    }
+    assert(saw_low_confidence);
+}
+
 void test_phase_estimator_no_anchor_frequency_update_when_stopping() {
     exo::ControlConfig config;
     exo::PhaseEstimator estimator(config.phase);
@@ -451,6 +543,9 @@ int main() {
     test_phase_estimator_tracks_signal();
     test_phase_estimator_applies_anchor_frequency_updates_during_active_walking();
     test_phase_estimator_no_anchor_frequency_update_when_stop_probability_high();
+    test_phase_estimator_delayed_confirm_rejects_single_frame_spike();
+    test_phase_estimator_applies_deferred_frequency_on_ramp_after_tracking();
+    test_phase_estimator_reports_low_confidence_reject_reason();
     test_phase_estimator_no_anchor_frequency_update_when_stopping();
     test_phase_estimator_ramp_uses_reduced_gain();
     test_stop_detector_ignores_static_large_spread_and_triggers_on_low_velocity();

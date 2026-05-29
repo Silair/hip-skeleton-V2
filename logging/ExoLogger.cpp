@@ -58,8 +58,8 @@ bool ExoLogger::open() {
 
     // 表头与 write() 中字段顺序一致，便于后处理脚本解析。
     stream_ << "SyncSessionId,StreamId,LoopSeq,EpochMs,MonoTimeS,DtS,Healthy,AssistState,FreezeState,"
-            << "MotionConfidence,StopProbability,Phase,PhaseValid,AnchorDetected,Frequency,Amplitude,"
-            << "AnchorFrequencyUpdated,AnchorRejected,AnchorMeasuredFrequencyHz,AnchorConfidence,OmegaCorrectionHz,"
+            << "MotionConfidence,StopProbability,Phase,PhaseValid,AnchorDetected,AnchorCandidate,Frequency,Amplitude,"
+            << "AnchorFrequencyUpdated,AnchorRejected,AnchorRejectReason,AnchorMeasuredFrequencyHz,AnchorConfidence,OmegaCorrectionHz,"
             << "AoSignalEstimateRad,AoSignalErrorRad,PhaseSignalRad,FilteredPhaseSignalRad,"
             << "SpreadDeg,PhaseVelocityDegS,SignedPhaseVelocityDegS,"
             << "FreezeRequested,PhaseTrackingEnabled,RecoveryActive,TorqueScale,AllowOutput,"
@@ -97,10 +97,12 @@ void ExoLogger::write(const ExoState& state,
             << phase.phase_rad << ','
             << (phase.valid ? 1 : 0) << ','
             << (phase.anchor_detected ? 1 : 0) << ','
+            << (phase.anchor_candidate ? 1 : 0) << ','
             << phase.frequency_hz << ','
             << phase.amplitude_rad << ','
             << (phase.anchor_frequency_updated ? 1 : 0) << ','
             << (phase.anchor_rejected ? 1 : 0) << ','
+            << phase.anchor_reject_reason << ','
             << phase.anchor_measured_frequency_hz << ','
             << phase.anchor_confidence << ','
             << phase.omega_correction_hz << ','

@@ -34,6 +34,7 @@ DEFAULT_EVALUATION_THRESHOLDS: Dict[str, float] = {
     "freeze_torque_violation_count": 0.0,
     "disallow_output_torque_violation_count": 0.0,
     "stationary_false_assist_s": 0.5,
+    "anchor_update_during_stop_count": 0.0,
     "simultaneous_high_torque_ratio": 0.02,
     "peak_torque_phase_mae_deg": 15.0,
 }
@@ -52,6 +53,11 @@ def fnum(row: Dict[str, str], key: str, default: float = 0.0) -> float:
         return float(value)
     except ValueError:
         return default
+
+
+def is_anchor_stop_context(row: Dict[str, str], stop_probability_threshold: float = 0.8) -> bool:
+    """Stopping assist state or high stop intent — anchor activity here is stop-context only."""
+    return int(fnum(row, "AssistState", -1.0)) == 4 or fnum(row, "StopProbability", 0.0) >= stop_probability_threshold
 
 
 def wrap_to_pi(angle: float) -> float:
@@ -183,6 +189,15 @@ def evaluate_metrics(metrics: Dict[str, object], thresholds: Optional[Dict[str, 
         _make_check(metrics, "freeze_torque_violation_count", "冻结时非零力矩违规", "==", limits["freeze_torque_violation_count"], "frames"),
         _make_check(metrics, "disallow_output_torque_violation_count", "禁止输出时非零力矩违规", "==", limits["disallow_output_torque_violation_count"], "frames"),
         _make_check(metrics, "stationary_false_assist_s", "静止误助力时长", "<=", limits["stationary_false_assist_s"], "s"),
+        _make_check(
+            metrics,
+            "anchor_update_during_stop_count",
+            "停步上下文频率 anchor 更新",
+            "==",
+            limits["anchor_update_during_stop_count"],
+            "frames",
+            required=False,
+        ),
     ]
 
     groups = {
@@ -529,20 +544,31 @@ def compute_metrics(rows: Sequence[Dict[str, str]], peak_min_spread_deg: float =
     anchor_detected_count = sum(1 for row in rows if fnum(row, "AnchorDetected", 0.0) >= 0.5)
     anchor_update_count = sum(1 for row in rows if fnum(row, "AnchorFrequencyUpdated", 0.0) >= 0.5)
     rejected_anchor_count = sum(1 for row in rows if fnum(row, "AnchorRejected", 0.0) >= 0.5)
+    anchor_reject_reason_counts: Dict[str, int] = {}
+    for row in rows:
+        if fnum(row, "AnchorRejected", 0.0) < 0.5:
+            continue
+        reason = int(fnum(row, "AnchorRejectReason", 0.0))
+        anchor_reject_reason_counts[str(reason)] = anchor_reject_reason_counts.get(str(reason), 0) + 1
     anchor_confidences = [
         fnum(row, "AnchorConfidence", 0.0)
         for row in rows
         if fnum(row, "AnchorFrequencyUpdated", 0.0) >= 0.5 and row.get("AnchorConfidence", "") != ""
     ]
-    false_anchor_during_stop_count = sum(
+    anchor_candidate_during_stop_count = sum(
         1
         for row in rows
-        if (
-            fnum(row, "AnchorFrequencyUpdated", 0.0) >= 0.5
-            or fnum(row, "AnchorRejected", 0.0) >= 0.5
-            or fnum(row, "AnchorDetected", 0.0) >= 0.5
-        )
-        and (int(fnum(row, "AssistState", -1.0)) == 4 or fnum(row, "StopProbability", 0.0) >= 0.8)
+        if fnum(row, "AnchorCandidate", 0.0) >= 0.5 and is_anchor_stop_context(row)
+    )
+    anchor_rejected_during_stop_count = sum(
+        1
+        for row in rows
+        if fnum(row, "AnchorRejected", 0.0) >= 0.5 and is_anchor_stop_context(row)
+    )
+    anchor_update_during_stop_count = sum(
+        1
+        for row in rows
+        if fnum(row, "AnchorFrequencyUpdated", 0.0) >= 0.5 and is_anchor_stop_context(row)
     )
     omega_corrections = [
         abs(fnum(row, "OmegaCorrectionHz", 0.0))
@@ -593,9 +619,12 @@ def compute_metrics(rows: Sequence[Dict[str, str]], peak_min_spread_deg: float =
         "anchor_detected_count": anchor_detected_count,
         "anchor_update_count": anchor_update_count,
         "rejected_anchor_count": rejected_anchor_count,
+        "anchor_reject_reason_counts": anchor_reject_reason_counts,
         "anchor_confidence_mean": None if not anchor_confidences else mean(anchor_confidences),
         "anchor_confidence_p95": percentile(anchor_confidences, 95.0),
-        "false_anchor_during_stop_count": false_anchor_during_stop_count,
+        "anchor_candidate_during_stop_count": anchor_candidate_during_stop_count,
+        "anchor_rejected_during_stop_count": anchor_rejected_during_stop_count,
+        "anchor_update_during_stop_count": anchor_update_during_stop_count,
         "omega_jump_p95_hz": percentile(omega_corrections, 95.0),
         "omega_jump_max_hz": max(omega_corrections) if omega_corrections else None,
     }
