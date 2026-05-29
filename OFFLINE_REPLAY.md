@@ -23,6 +23,7 @@ g++ -std=c++17 \
   hs_exoskeleton_v2/control/PhaseEstimator.cpp \
   hs_exoskeleton_v2/control/IntentDetector.cpp \
   hs_exoskeleton_v2/control/FreezeManager.cpp \
+  hs_exoskeleton_v2/control/StopDetector.cpp \
   hs_exoskeleton_v2/control/AssistStateMachine.cpp \
   hs_exoskeleton_v2/control/TorqueProfile.cpp \
   hs_exoskeleton_v2/logging/ExoLogger.cpp \
@@ -62,8 +63,11 @@ LeftJointVelRadS,RightJointVelRadS,Healthy,Enabled
 `make_replay_curve.py` 支持内置曲线：
 
 - `sine`：稳定周期步态；适合看 AO 稳态相位误差、力矩峰值相位。
-- `stop_go`：走-停-走；适合看冻结、恢复、静止误助力。
+- `stop_go`：走-停-走；适合看停步、恢复、静止误助力。
 - `freq_ramp`：步频线性变化；适合看频率追踪与收敛。
+- `amplitude_ramp`：步幅从小到大再变小；适合看助力进入/退出边界。
+- `abrupt_stop`：正常行走后停在非零开合姿态；适合复现“停下后大 spread 误助力”。
+- `asymmetric`：左右幅值和相位略不一致；适合看真实非对称步态下的相位/力矩鲁棒性。
 - `custom`：用表达式直接设计左右关节角。
 
 示例：
@@ -81,6 +85,21 @@ python3 hs_exoskeleton_v2/tools/make_replay_curve.py \
 表达式可用变量/函数：`t`, `pi`, `tau`, `sin`, `cos`, `sqrt`, `exp`, `min`, `max` 等。
 
 > 注意：当前 `GaitFeatureExtractor` 用 `left.position_rad + right.position_rad` 作为标量步态信号。默认生成器会把设计的标量信号平均分到左右两侧，以便在这个符号约定下产生清晰相位。若你的真实数据左右符号相反，可以在自定义表达式或 CSV 预处理时做符号转换。
+
+## 建议批量测试曲线
+
+最小上机前离线套件建议覆盖：
+
+```bash
+python3 tools/make_replay_curve.py --output /tmp/steady_0p8.csv --scenario sine --duration-s 12 --rate-hz 50 --amplitude-rad 0.35 --frequency-hz 0.8
+python3 tools/make_replay_curve.py --output /tmp/freq_ramp.csv --scenario freq_ramp --duration-s 18 --rate-hz 50 --amplitude-rad 0.35 --frequency-hz 0.6 --ramp-end-frequency-hz 1.2
+python3 tools/make_replay_curve.py --output /tmp/amp_ramp.csv --scenario amplitude_ramp --duration-s 18 --rate-hz 50 --amplitude-rad 0.40 --min-amplitude-rad 0.08 --frequency-hz 0.8
+python3 tools/make_replay_curve.py --output /tmp/stop_go.csv --scenario stop_go --duration-s 18 --rate-hz 50 --amplitude-rad 0.35 --frequency-hz 0.8
+python3 tools/make_replay_curve.py --output /tmp/abrupt_stop.csv --scenario abrupt_stop --duration-s 12 --rate-hz 50 --amplitude-rad 0.35 --frequency-hz 0.8 --stop-time-s 5.2
+python3 tools/make_replay_curve.py --output /tmp/asymmetric.csv --scenario asymmetric --duration-s 12 --rate-hz 50 --amplitude-rad 0.35 --frequency-hz 0.8
+```
+
+其中 `sine` 和 `freq_ramp` 应优先 PASS；`stop_go`、`abrupt_stop`、`amplitude_ramp` 是过渡/边界压力测试，重点看静止误助力、停步后的力矩降为 0、恢复时间和状态时序，不应只按单一总评判断。
 
 ## 输出与评价
 

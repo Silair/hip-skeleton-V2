@@ -58,6 +58,15 @@ def active_envelope(t: float, duration: float) -> float:
     return ramp
 
 
+def amplitude_ramp(t: float, duration: float, min_amplitude: float, max_amplitude: float) -> float:
+    half = max(duration * 0.5, 1e-9)
+    if t <= half:
+        ratio = t / half
+    else:
+        ratio = max(0.0, (duration - t) / half)
+    return min_amplitude + (max_amplitude - min_amplitude) * ratio
+
+
 def signal_for_scenario(args: argparse.Namespace, t: float) -> float:
     if args.scenario == "sine":
         phase = TAU * args.frequency_hz * t
@@ -69,6 +78,15 @@ def signal_for_scenario(args: argparse.Namespace, t: float) -> float:
         # Linear frequency ramp from frequency_hz to ramp_end_frequency_hz.
         k = (args.ramp_end_frequency_hz - args.frequency_hz) / max(args.duration_s, 1e-9)
         phase = TAU * (args.frequency_hz * t + 0.5 * k * t * t)
+        return args.amplitude_rad * math.sin(phase)
+    if args.scenario == "amplitude_ramp":
+        phase = TAU * args.frequency_hz * t
+        amp = amplitude_ramp(t, args.duration_s, args.min_amplitude_rad, args.amplitude_rad)
+        return amp * math.sin(phase)
+    if args.scenario == "abrupt_stop":
+        hold_t = min(max(args.stop_time_s, 0.0), args.duration_s)
+        effective_t = min(t, hold_t)
+        phase = TAU * args.frequency_hz * effective_t
         return args.amplitude_rad * math.sin(phase)
     raise ValueError(f"scenario {args.scenario!r} should be handled by expressions")
 
@@ -85,6 +103,10 @@ def generate_positions(args: argparse.Namespace) -> List[Tuple[float, float, flo
                 raise ValueError("--left-expr and --right-expr must be provided together")
             left = eval_expr(args.left_expr, t)
             right = eval_expr(args.right_expr, t)
+        elif args.scenario == "asymmetric":
+            phase = TAU * args.frequency_hz * t
+            left = 0.55 * args.amplitude_rad * math.sin(phase)
+            right = 0.35 * args.amplitude_rad * math.sin(phase + args.asymmetry_phase_rad)
         else:
             signal = signal_for_scenario(args, t)
             # GaitFeatureExtractor currently uses left + right as the phase signal.
@@ -148,12 +170,15 @@ def write_curve(path: Path, rows: List[Tuple[float, float, float, int, int]]) ->
 def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate a joint-angle curve CSV for V2 offline replay.")
     parser.add_argument("--output", required=True, help="Output curve CSV path.")
-    parser.add_argument("--scenario", choices=["sine", "stop_go", "freq_ramp", "custom"], default="sine")
+    parser.add_argument("--scenario", choices=["sine", "stop_go", "freq_ramp", "amplitude_ramp", "abrupt_stop", "asymmetric", "custom"], default="sine")
     parser.add_argument("--duration-s", type=float, default=12.0)
     parser.add_argument("--rate-hz", type=float, default=50.0)
     parser.add_argument("--amplitude-rad", type=float, default=0.35)
     parser.add_argument("--frequency-hz", type=float, default=0.8)
     parser.add_argument("--ramp-end-frequency-hz", type=float, default=1.2)
+    parser.add_argument("--min-amplitude-rad", type=float, default=0.08)
+    parser.add_argument("--stop-time-s", type=float, default=0.0, help="Time where abrupt_stop holds the current nonzero pose; defaults to 40% of duration")
+    parser.add_argument("--asymmetry-phase-rad", type=float, default=0.25)
     parser.add_argument("--noise-rad", type=float, default=0.0)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--left-expr", help="Custom Python math expression using t, pi, tau, sin/cos/etc.")
@@ -166,6 +191,10 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         parser.error("--rate-hz must be positive")
     if args.scenario == "custom" and not (args.left_expr and args.right_expr):
         parser.error("custom scenario requires --left-expr and --right-expr")
+    if args.scenario == "abrupt_stop" and args.stop_time_s <= 0.0:
+        args.stop_time_s = args.duration_s * 0.40
+    if args.min_amplitude_rad < 0.0:
+        parser.error("--min-amplitude-rad must be non-negative")
     return args
 
 

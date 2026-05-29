@@ -24,6 +24,7 @@
 #include "control/GaitFeatures.h"
 #include "control/IntentDetector.h"
 #include "control/PhaseEstimator.h"
+#include "control/StopDetector.h"
 #include "control/TorqueProfile.h"
 #include "hardware/JointTypes.h"
 #include "logging/ExoLogger.h"
@@ -282,6 +283,7 @@ int runReplay(const ReplayOptions& options) {
     GaitFeatureExtractor feature_extractor(config.phase);
     PhaseEstimator phase_estimator(config.phase);
     IntentDetector intent_detector(config.intent);
+    StopDetector stop_detector(config.stop);
     FreezeManager freeze_manager(config.freeze);
     AssistStateMachine assist_state_machine(config.assist);
     TorqueProfile torque_profile(config.torque);
@@ -323,8 +325,10 @@ int runReplay(const ReplayOptions& options) {
         state.health = sample.healthy ? ExoHealth::Nominal : ExoHealth::CommunicationFault;
         epoch_ms += static_cast<int64_t>(std::llround(dt_s * 1000.0));
 
+        StopDecision stop = stop_detector.update(state, controller_dt_s);
         GaitFeatures features = feature_extractor.update(state, controller_dt_s);
-        PhaseEstimate phase = phase_estimator.update(features, controller_dt_s, freeze.phase_tracking_enabled);
+        const bool phase_tracking_enabled = freeze.phase_tracking_enabled && stop.phase_tracking_enabled;
+        PhaseEstimate phase = phase_estimator.update(features, controller_dt_s, phase_tracking_enabled);
         features.amplitude_rad = phase.amplitude_rad;
         features.frequency_hz = phase.frequency_hz;
 
@@ -333,8 +337,9 @@ int runReplay(const ReplayOptions& options) {
 
         AssistInputs assist_inputs{};
         assist_inputs.motion_confidence = intent.motion_confidence;
-        assist_inputs.phase_valid = phase.valid && !freeze.recovery_active;
+        assist_inputs.phase_valid = phase.valid && !freeze.recovery_active && !stop.stop_requested;
         assist_inputs.anchor_detected = phase.anchor_detected;
+        assist_inputs.stop_requested = stop.stop_requested;
         assist_inputs.freeze_requested = freeze.freeze_requested;
         assist_inputs.faulted = !state.healthy;
 
