@@ -8,6 +8,7 @@
 #include "control/GaitFeatureExtractor.h"
 #include "control/IntentDetector.h"
 #include "control/PhaseEstimator.h"
+#include "control/StopDetector.h"
 #include "control/TorqueProfile.h"
 #include "hardware/IExoHardware.h"
 #include "logging/ExoLogger.h"
@@ -30,6 +31,7 @@ private:
     GaitFeatureExtractor feature_extractor_;
     PhaseEstimator phase_estimator_;
     IntentDetector intent_detector_;
+    StopDetector stop_detector_;
     FreezeManager freeze_manager_;
     AssistStateMachine assist_state_machine_;
     TorqueProfile torque_profile_;

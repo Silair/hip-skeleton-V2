@@ -18,6 +18,14 @@ struct IntentConfig {
 };
 
 // 进入/退出「冻结」的滞回：概率阈值 + 持续满足时间，避免抖动（FreezeManager）。
+struct StopConfig {
+    double velocity_threshold_rad_s = 0.08;
+    double exit_velocity_threshold_rad_s = 0.16;
+    double enter_hold_seconds = 0.16;
+    double exit_hold_seconds = 0.08;
+    double velocity_filter_alpha = 0.25;
+};
+
 struct FreezeConfig {
     double enter_stop_probability = 0.78;
     double exit_stop_probability = 0.35;
@@ -63,6 +71,7 @@ struct ControlConfig {
     double loop_frequency_hz = 50.0;
     double run_duration_s = 180.0;
     IntentConfig intent{};
+    StopConfig stop{};
     FreezeConfig freeze{};
     AssistConfig assist{};
     TorqueConfig torque{};

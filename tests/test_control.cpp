@@ -9,6 +9,7 @@
 #include "control/GaitFeatures.h"
 #include "control/IntentDetector.h"
 #include "control/PhaseEstimator.h"
+#include "control/StopDetector.h"
 #include "control/TorqueProfile.h"
 #include "config/ControlConfig.h"
 #include "hardware/JointTypes.h"
@@ -156,6 +157,109 @@ void test_phase_estimator_tracks_signal() {
     assert(estimate.frequency_hz > 0.5);
 }
 
+
+void test_stop_detector_ignores_static_large_spread_and_triggers_on_low_velocity() {
+    exo::ControlConfig config;
+    config.stop.velocity_threshold_rad_s = 0.08;
+    config.stop.enter_hold_seconds = 0.16;
+    config.stop.velocity_filter_alpha = 1.0;
+    exo::StopDetector detector(config.stop);
+
+    exo::ExoState state{};
+    state.left.position_rad = 0.45;
+    state.right.position_rad = -0.35;
+    state.left.velocity_rad_s = 0.02;
+    state.right.velocity_rad_s = -0.03;
+
+    exo::StopDecision decision{};
+    for (int i = 0; i < 8; ++i) {
+        decision = detector.update(state, 0.02);
+    }
+
+    assert(decision.stop_requested);
+    assert(!decision.phase_tracking_enabled);
+    assert(decision.average_abs_velocity_rad_s < config.stop.velocity_threshold_rad_s);
+}
+
+void test_stop_detector_exits_when_joint_velocity_returns() {
+    exo::ControlConfig config;
+    config.stop.velocity_threshold_rad_s = 0.08;
+    config.stop.exit_velocity_threshold_rad_s = 0.16;
+    config.stop.enter_hold_seconds = 0.10;
+    config.stop.exit_hold_seconds = 0.06;
+    config.stop.velocity_filter_alpha = 1.0;
+    exo::StopDetector detector(config.stop);
+
+    exo::ExoState state{};
+    state.left.velocity_rad_s = 0.01;
+    state.right.velocity_rad_s = 0.01;
+    for (int i = 0; i < 6; ++i) {
+        detector.update(state, 0.02);
+    }
+
+    state.left.velocity_rad_s = 0.30;
+    state.right.velocity_rad_s = -0.28;
+    exo::StopDecision decision{};
+    for (int i = 0; i < 4; ++i) {
+        decision = detector.update(state, 0.02);
+    }
+
+    assert(!decision.stop_requested);
+    assert(decision.phase_tracking_enabled);
+}
+
+void test_assist_state_machine_stop_request_uses_stopping_state_with_output_until_scale_reaches_zero() {
+    exo::ControlConfig config;
+    config.assist.warmup_anchor_count = 1;
+    config.assist.ramp_up_rate_per_s = 10.0;
+    config.assist.ramp_down_rate_per_s = 2.0;
+    exo::AssistStateMachine machine(config.assist);
+
+    exo::AssistInputs inputs{};
+    inputs.motion_confidence = 0.9;
+    inputs.phase_valid = true;
+    inputs.anchor_detected = true;
+
+    exo::AssistOutput output = machine.update(inputs, 0.02);
+    output = machine.update(inputs, 0.02);
+    inputs.anchor_detected = false;
+    output = machine.update(inputs, 0.20);
+    assert(output.torque_scale > 0.0);
+
+    inputs.stop_requested = true;
+    output = machine.update(inputs, 0.02);
+
+    assert(output.state == exo::AssistState::Stopping);
+    assert(output.torque_scale > 0.0);
+    assert(output.allow_output);
+}
+
+
+void test_assist_state_machine_freeze_request_disables_output_immediately() {
+    exo::ControlConfig config;
+    config.assist.warmup_anchor_count = 1;
+    config.assist.ramp_up_rate_per_s = 10.0;
+    exo::AssistStateMachine machine(config.assist);
+
+    exo::AssistInputs inputs{};
+    inputs.motion_confidence = 0.9;
+    inputs.phase_valid = true;
+    inputs.anchor_detected = true;
+
+    exo::AssistOutput output = machine.update(inputs, 0.02);
+    output = machine.update(inputs, 0.02);
+    inputs.anchor_detected = false;
+    output = machine.update(inputs, 0.20);
+    assert(output.torque_scale > 0.0);
+
+    inputs.freeze_requested = true;
+    output = machine.update(inputs, 0.02);
+
+    assert(output.state == exo::AssistState::Frozen);
+    assert(output.torque_scale == 0.0);
+    assert(!output.allow_output);
+}
+
 } // namespace
 
 int main() {
@@ -166,5 +270,9 @@ int main() {
     test_freeze_manager_uses_hysteresis();
     test_gait_feature_extractor_generates_velocity();
     test_phase_estimator_tracks_signal();
+    test_stop_detector_ignores_static_large_spread_and_triggers_on_low_velocity();
+    test_stop_detector_exits_when_joint_velocity_returns();
+    test_assist_state_machine_stop_request_uses_stopping_state_with_output_until_scale_reaches_zero();
+    test_assist_state_machine_freeze_request_disables_output_immediately();
     return 0;
 }

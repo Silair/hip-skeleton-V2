@@ -13,6 +13,10 @@ AssistOutput AssistStateMachine::update(const AssistInputs& inputs, double dt_s)
         torque_scale_ = 0.0;
     } else if (inputs.freeze_requested) {
         state_ = AssistState::Frozen;
+        torque_scale_ = 0.0;
+        warmup_anchor_count_ = 0;
+    } else if (inputs.stop_requested) {
+        state_ = AssistState::Stopping;
         torque_scale_ = std::max(0.0, torque_scale_ - config_.ramp_down_rate_per_s * dt_s);
     } else {
         switch (state_) {
@@ -56,6 +60,13 @@ AssistOutput AssistStateMachine::update(const AssistInputs& inputs, double dt_s)
                 torque_scale_ = 1.0;
             }
             break;
+        case AssistState::Stopping:
+            if (!inputs.stop_requested) {
+                state_ = AssistState::Tracking;
+                torque_scale_ = 0.0;
+                warmup_anchor_count_ = 0;
+            }
+            break;
         case AssistState::Frozen:
             if (!inputs.freeze_requested) {
                 state_ = AssistState::Tracking;
@@ -71,7 +82,7 @@ AssistOutput AssistStateMachine::update(const AssistInputs& inputs, double dt_s)
     AssistOutput output{};
     output.state = state_;
     output.torque_scale = torque_scale_;
-    output.allow_output = (state_ == AssistState::Ramp || state_ == AssistState::Active) && torque_scale_ > 0.0;
+    output.allow_output = (state_ == AssistState::Ramp || state_ == AssistState::Active || state_ == AssistState::Stopping) && torque_scale_ > 0.0;
     return output;
 }
 

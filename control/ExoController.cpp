@@ -24,6 +24,7 @@ ExoController::ExoController(const ControlConfig& config, IExoHardware& hardware
       feature_extractor_(config.phase),
       phase_estimator_(config.phase),
       intent_detector_(config.intent),
+      stop_detector_(config.stop),
       freeze_manager_(config.freeze),
       assist_state_machine_(config.assist),
       torque_profile_(config.torque) {}
@@ -80,9 +81,11 @@ bool ExoController::run() {
             return false;
         }
 
-        // ---------- 控制链：传感器态 → 步态特征 → 相位（可受冻结策略门控）----------
+        // ---------- 控制链：传感器态 → 停步检测/步态特征 → 相位（可受冻结/停步策略门控）----------
+        StopDecision stop = stop_detector_.update(state, controller_dt_s);
         GaitFeatures features = feature_extractor_.update(state, controller_dt_s);
-        PhaseEstimate phase = phase_estimator_.update(features, controller_dt_s, freeze.phase_tracking_enabled);
+        const bool phase_tracking_enabled = freeze.phase_tracking_enabled && stop.phase_tracking_enabled;
+        PhaseEstimate phase = phase_estimator_.update(features, controller_dt_s, phase_tracking_enabled);
         // 将相位估计的幅值/频率写回特征，供意图检测使用更一致的观测。
         features.amplitude_rad = phase.amplitude_rad;
         features.frequency_hz = phase.frequency_hz;
@@ -94,8 +97,9 @@ bool ExoController::run() {
         // ---------- 助力状态机：综合运动置信度、相位有效、锚点、冻结请求与健康 ----------
         AssistInputs assist_inputs{};
         assist_inputs.motion_confidence = intent.motion_confidence;
-        assist_inputs.phase_valid = phase.valid && !freeze.recovery_active;
+        assist_inputs.phase_valid = phase.valid && !freeze.recovery_active && !stop.stop_requested;
         assist_inputs.anchor_detected = phase.anchor_detected;
+        assist_inputs.stop_requested = stop.stop_requested;
         assist_inputs.freeze_requested = freeze.freeze_requested;
         assist_inputs.faulted = !state.healthy;
 

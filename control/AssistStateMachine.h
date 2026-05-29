@@ -11,6 +11,7 @@ enum class AssistState {
     Tracking,
     Ramp,
     Active,
+    Stopping,
     Frozen,
     Fault,
 };
@@ -19,6 +20,7 @@ struct AssistInputs {
     double motion_confidence = 0.0;
     bool phase_valid = false;
     bool anchor_detected = false;
+    bool stop_requested = false;
     bool freeze_requested = false;
     bool faulted = false;
 };
