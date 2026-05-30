@@ -42,6 +42,127 @@ python3 hs_exoskeleton_v2/tools/analyze_run.py \
   /tmp/hsx_replay_logs/<date>/sine_replay_1_<date>.csv
 ```
 
+## MuJoCo 单腿 dry-run
+
+如果已经有单腿 MuJoCo 模型，可以先把仿真关节角导出为同一套 replay CSV，再复用上面的 V2 离线控制器与 `analyze_run.py`。这一步只验证“MuJoCo 状态 -> V2 控制算法 -> 日志评价”，不把 V2 力矩回写到 MuJoCo 模型。
+
+当前本机已验证的模型路径：
+
+```bash
+/home/lin/exo_mujoco_sim/models/hip_exo_1dof.xml
+```
+
+生成单腿 dry-run 曲线：
+
+```bash
+/home/lin/miniconda3/envs/mujoco/bin/python tools/mujoco_dry_run_curve.py \
+  --mjcf /home/lin/exo_mujoco_sim/models/hip_exo_1dof.xml \
+  --output /tmp/hsx_mujoco_dry_run/hip_1dof_curve.csv \
+  --joint hip \
+  --driver-actuator hip_human_motor \
+  --duration-s 12 \
+  --sample-rate-hz 50 \
+  --amplitude-deg 40 \
+  --frequency-hz 0.8 \
+  --driver-kp 80 \
+  --driver-kd 8 \
+  --virtual-right copy
+```
+
+说明：
+
+- `--driver-actuator` 只作为仿真里的“人体驱动”让单腿摆动；V2 计算出的外骨骼力矩不会施加到 MuJoCo。
+- `--virtual-right copy` 会把单腿角度复制为右侧虚拟输入，使当前 `left + right` 步态信号有足够幅值触发 anchor。若想更保守地只用单腿输入，可改为 `--virtual-right zero`，但可能无法进入助力状态。
+- 输出 CSV 可直接喂给 `hs_exoskeleton_v2_replay`，再用 `tools/analyze_run.py` 生成报告。
+
+### MuJoCo 实时 dry-run
+
+如果需要确认 V2 控制链能在 MuJoCo step 循环内直接运行，可编译 `tools/mujoco_realtime_dry_run.cpp`。它每 50 Hz 从 MuJoCo 读髋关节状态、运行 V2 控制模块、写标准 runtime CSV；V2 算出的力矩只记录，不施加回 MuJoCo，`hip_exo_motor` 会被强制保持 0。
+
+```bash
+g++ -std=c++17 \
+  -I. \
+  -I/home/lin/code/2026.4.14hs_exoskeleton/include \
+  -I/home/lin/miniconda3/envs/mujoco/lib/python3.11/site-packages/mujoco/include \
+  tools/mujoco_realtime_dry_run.cpp \
+  control/GaitFeatureExtractor.cpp control/PhaseEstimator.cpp \
+  control/IntentDetector.cpp control/FreezeManager.cpp \
+  control/AssistStateMachine.cpp control/TorqueProfile.cpp \
+  control/StopDetector.cpp control/StopTorqueLimiter.cpp \
+  logging/ExoLogger.cpp logging/Clock.cpp \
+  /home/lin/miniconda3/envs/mujoco/lib/python3.11/site-packages/mujoco/libmujoco.so.3.9.0 \
+  -Wl,-rpath,/home/lin/miniconda3/envs/mujoco/lib/python3.11/site-packages/mujoco \
+  -o /tmp/hsx_mujoco_realtime_dry_run
+
+/tmp/hsx_mujoco_realtime_dry_run \
+  --mjcf /home/lin/exo_mujoco_sim/models/hip_exo_1dof.xml \
+  --output-dir /tmp/hsx_mujoco_realtime_out/logs \
+  --prefix realtime_hip_1dof \
+  --joint hip \
+  --driver-actuator hip_human_motor \
+  --exo-actuator hip_exo_motor \
+  --duration-s 12 \
+  --sample-rate-hz 50 \
+  --amplitude-deg 40 \
+  --frequency-hz 0.8 \
+  --driver-kp 80 \
+  --driver-kd 8 \
+  --virtual-right copy
+
+python3 tools/analyze_run.py \
+  /tmp/hsx_mujoco_realtime_out/logs/<date>/realtime_hip_1dof_1_<date>.csv \
+  --output-dir /tmp/hsx_mujoco_realtime_out/report
+```
+
+小增益闭环可以在确认 dry-run 正常后开启：
+
+```bash
+/tmp/hsx_mujoco_realtime_dry_run \
+  --mjcf /home/lin/exo_mujoco_sim/models/hip_exo_1dof.xml \
+  --output-dir /tmp/hsx_mujoco_closed_loop_005/logs \
+  --prefix closed_loop_005_hip_1dof \
+  --joint hip \
+  --driver-actuator hip_human_motor \
+  --exo-actuator hip_exo_motor \
+  --duration-s 12 \
+  --sample-rate-hz 50 \
+  --amplitude-deg 40 \
+  --frequency-hz 0.8 \
+  --driver-kp 80 \
+  --driver-kd 8 \
+  --virtual-right copy \
+  --apply-v2-torque-scale 0.05
+```
+
+`--apply-v2-torque-scale 0.05` 表示将 V2 的左侧力矩乘以 5% 后施加到单腿模型的 `hip_exo_motor`，并按 MuJoCo actuator `ctrlrange` 限幅。runtime CSV 中仍记录 V2 原始计算力矩；实际施加到 MuJoCo 的力矩为该列乘以比例。
+
+停走/急停安全边界可通过驱动场景参数扫描：
+
+```bash
+# 走 4s，停 3s，再恢复行走
+/tmp/hsx_mujoco_realtime_dry_run \
+  --mjcf /home/lin/exo_mujoco_sim/models/hip_exo_1dof.xml \
+  --output-dir /tmp/hsx_mujoco_safety_sweep/stop_go/scale_100/logs \
+  --prefix stop_go_100_hip_1dof \
+  --duration-s 14 \
+  --driver-scenario stop_go \
+  --stop-start-s 4 \
+  --stop-duration-s 3 \
+  --apply-v2-torque-scale 1.0
+
+# 走到 4s 后急停并保持停止姿态
+/tmp/hsx_mujoco_realtime_dry_run \
+  --mjcf /home/lin/exo_mujoco_sim/models/hip_exo_1dof.xml \
+  --output-dir /tmp/hsx_mujoco_safety_sweep/abrupt_stop/scale_100/logs \
+  --prefix abrupt_stop_100_hip_1dof \
+  --duration-s 12 \
+  --driver-scenario abrupt_stop \
+  --stop-start-s 4 \
+  --apply-v2-torque-scale 1.0
+```
+
+`--driver-scenario` 支持 `sine`、`stop_go`、`abrupt_stop`。安全边界优先看 `stationary_false_assist_s`、`anchor_update_during_stop_count`、`freeze_torque_violation_count`、`disallow_output_torque_violation_count`。
+
 ## 输入曲线 CSV 格式
 
 必需列：
