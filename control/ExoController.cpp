@@ -10,8 +10,33 @@
 #include <chrono>
 #include <thread>
 #include <algorithm>
+#include <iostream>
 
 namespace exo {
+
+namespace {
+
+const char* assistStateName(AssistState state) {
+    switch (state) {
+    case AssistState::Transparent:
+        return "Transparent";
+    case AssistState::Tracking:
+        return "Tracking";
+    case AssistState::Ramp:
+        return "Ramp";
+    case AssistState::Active:
+        return "Active";
+    case AssistState::Stopping:
+        return "Stopping";
+    case AssistState::Frozen:
+        return "Frozen";
+    case AssistState::Fault:
+        return "Fault";
+    }
+    return "Unknown";
+}
+
+} // namespace
 
 // 成员初始化顺序 = 声明顺序（C++ 规则）。各子模块在构造时从 config_ 的不同子结构取参：
 // - phase：特征提取与相位估计共用一套步态/相位相关阈值与时间常数。
@@ -34,15 +59,23 @@ ExoController::ExoController(const ControlConfig& config, IExoHardware& hardware
 // 顺序：总线/设备 → 电机使能 → 零位标定（若实现支持跳过则由硬件层决定）→ 打开日志文件。
 bool ExoController::initialize() {
     if (!hardware_.initialize()) {
+        std::cerr << "ExoController initialize failed: hardware initialize failed" << std::endl;
         return false;
     }
     if (!hardware_.enable()) {
+        std::cerr << "ExoController initialize failed: motor enable failed" << std::endl;
         return false;
     }
     if (!hardware_.calibrateZero()) {
+        std::cerr << "ExoController initialize failed: zero calibration failed" << std::endl;
         return false;
     }
-    return logger_.open();
+    if (!logger_.open()) {
+        std::cerr << "ExoController initialize failed: logger open failed" << std::endl;
+        return false;
+    }
+    std::cout << "ExoController initialized. Log: " << logger_.outputPath() << std::endl;
+    return true;
 }
 
 // 固定目标频率的「软实时」循环：用 steady_clock + sleep_until 对齐节拍，实际周期仍受 OS 调度影响。
@@ -59,6 +92,7 @@ bool ExoController::run() {
     }
 
     double current_time_s = 0.0;
+    double next_status_print_s = 0.0;
     uint64_t loop_seq = 0;
     FreezeDecision freeze{};
     // 丢弃「从构造到进入循环」的间隔，避免第一帧 dt 巨大；此后每帧 dtSeconds() 为与上一采样点间隔。
@@ -125,6 +159,21 @@ bool ExoController::run() {
         command.left_joint_torque_nm = torque.left_nm;
         command.right_joint_torque_nm = torque.right_nm;
         command.allow_output = assist.allow_output && !freeze.freeze_requested && state.healthy;
+
+        if (current_time_s >= next_status_print_s) {
+            std::cout << "t=" << current_time_s
+                      << "s state=" << assistStateName(assist.state)
+                      << " allow_output=" << (command.allow_output ? 1 : 0)
+                      << " torque_scale=" << assist.torque_scale
+                      << " motion_conf=" << intent.motion_confidence
+                      << " stop_prob=" << intent.stop_probability
+                      << " phase_valid=" << (phase.valid ? 1 : 0)
+                      << " anchor=" << (phase.anchor_detected ? 1 : 0)
+                      << " left_nm=" << torque.left_nm
+                      << " right_nm=" << torque.right_nm
+                      << std::endl;
+            next_status_print_s = current_time_s + 1.0;
+        }
 
         // 先写 CSV 再下发：记录的是「本周期算出的意图/力矩」；若 apply 失败会急停并返回，本行已执行便于事后对齐最后一帧 good 数据。
         logger_.write(state, features, phase, intent, freeze, assist, torque);

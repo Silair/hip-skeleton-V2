@@ -1,6 +1,7 @@
 #include "hardware/KvaserExoHardware.h"
 
 #include <chrono>
+#include <iostream>
 #include <thread>
 
 #include "UnitConv.h"
@@ -18,7 +19,11 @@ bool KvaserExoHardware::initialize() {
     device_.setMotor(motor);
     // 将配置中的比特率映射到 Kvaser API 常量（1M 用枚举，其余按数值）。
     const int bitrate = (config_.can_bitrate == 1000000) ? canBITRATE_1M : config_.can_bitrate;
-    initialized_ = (device_.CANBus().canInit(config_.can_channel, bitrate) == 0);
+    const int init_result = device_.CANBus().canInit(config_.can_channel, bitrate);
+    initialized_ = (init_result == 0);
+    std::cout << "Kvaser initialize: channel=" << config_.can_channel
+              << " bitrate=" << config_.can_bitrate
+              << " result=" << init_result << std::endl;
     return initialized_;
 }
 
@@ -27,8 +32,19 @@ bool KvaserExoHardware::enable() {
         return false;
     }
 
-    const bool left_ok = device_.CANBus().MotorOnOff(config_.left_motor_id, 0x01) == 0;
-    const bool right_ok = device_.CANBus().MotorOnOff(config_.right_motor_id, 0x01) == 0;
+    const int left_result = device_.CANBus().MotorOnOff(config_.left_motor_id, 0x01);
+    const int right_result = device_.CANBus().MotorOnOff(config_.right_motor_id, 0x01);
+    const bool left_ok = left_result == 0;
+    const bool right_ok = right_result == 0;
+    std::cout << "Motor enable: left_id=" << config_.left_motor_id
+              << " result=" << left_result
+              << ", right_id=" << config_.right_motor_id
+              << " result=" << right_result << std::endl;
+    if ((!left_ok || !right_ok) && config_.ignore_motor_enable_result) {
+        std::cerr << "WARNING: ignoring MotorOnOff failure because HSX_IGNORE_MOTOR_ENABLE_RESULT=1" << std::endl;
+        enabled_ = true;
+        return true;
+    }
     enabled_ = left_ok && right_ok;
     return enabled_;
 }
@@ -40,10 +56,20 @@ bool KvaserExoHardware::calibrateZero() {
     }
 
     std::this_thread::sleep_for(std::chrono::milliseconds(config_.calibration_prompt_wait_ms));
-    const bool left_ok = device_.CANBus().MotorZeroSet(config_.left_motor_id) == 0;
-    const bool right_ok = device_.CANBus().MotorZeroSet(config_.right_motor_id) == 0;
+    const int left_result = device_.CANBus().MotorZeroSet(config_.left_motor_id);
+    const int right_result = device_.CANBus().MotorZeroSet(config_.right_motor_id);
+    const bool left_ok = left_result == 0;
+    const bool right_ok = right_result == 0;
+    std::cout << "Motor zero set: left_result=" << left_result
+              << ", right_result=" << right_result << std::endl;
     std::this_thread::sleep_for(std::chrono::milliseconds(config_.post_zero_wait_ms));
-    return left_ok && right_ok && enable();
+    if ((!left_ok || !right_ok) && !config_.ignore_zero_result) {
+        return false;
+    }
+    if (!left_ok || !right_ok) {
+        std::cerr << "WARNING: ignoring MotorZeroSet failure because HSX_IGNORE_ZERO_RESULT=1" << std::endl;
+    }
+    return enable();
 }
 
 bool KvaserExoHardware::readMotorRegs(long motor_id, double& position_rad, double& velocity_rad_s, int& error_code) const {
@@ -74,6 +100,10 @@ bool KvaserExoHardware::readState(ExoState& state) {
 
     const bool left_ok = readMotorRegs(config_.left_motor_id, left_pos_rad, left_vel_rad_s, left_error);
     const bool right_ok = readMotorRegs(config_.right_motor_id, right_pos_rad, right_vel_rad_s, right_error);
+    if (!left_ok || !right_ok) {
+        std::cerr << "Motor read failed: left_ok=" << left_ok
+                  << " right_ok=" << right_ok << std::endl;
+    }
 
     // 读成功后再映射到关节空间，便于上层算法统一处理。
     state.left = mapper_.toLeftJointState(left_pos_rad, left_vel_rad_s);
@@ -90,8 +120,14 @@ bool KvaserExoHardware::applyCommand(const ExoCommand& command) {
     const double left_command = command.allow_output ? mapper_.leftJointTorqueToMotorCommand(command.left_joint_torque_nm) : 0.0;
     const double right_command = command.allow_output ? mapper_.rightJointTorqueToMotorCommand(command.right_joint_torque_nm) : 0.0;
 
-    const bool left_ok = device_.CANBus().torqueMode(config_.left_motor_id, static_cast<float>(left_command)) == 0;
-    const bool right_ok = device_.CANBus().torqueMode(config_.right_motor_id, static_cast<float>(right_command)) == 0;
+    const int left_result = device_.CANBus().torqueMode(config_.left_motor_id, static_cast<float>(left_command));
+    const int right_result = device_.CANBus().torqueMode(config_.right_motor_id, static_cast<float>(right_command));
+    const bool left_ok = left_result == 0;
+    const bool right_ok = right_result == 0;
+    if (!left_ok || !right_ok) {
+        std::cerr << "Torque command failed: left_result=" << left_result
+                  << " right_result=" << right_result << std::endl;
+    }
     return left_ok && right_ok;
 }
 

@@ -26,6 +26,8 @@ struct HardwareConfig {
 
     // 上电后是否自动零位、等待用户准备与零位后的短暂延时（毫秒）。
     bool calibrate_on_start = true;
+    bool ignore_motor_enable_result = false;
+    bool ignore_zero_result = false;
     int calibration_prompt_wait_ms = 1000;
     int post_zero_wait_ms = 200;
 };
