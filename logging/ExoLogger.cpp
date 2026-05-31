@@ -63,6 +63,8 @@ bool ExoLogger::open() {
             << "StartupPriorValid,StartupPriorCandidate,StartupPriorApplied,StartupPriorFrequencyHz,StartupPriorConfidence,"
             << "AoSignalEstimateRad,AoSignalErrorRad,PhaseSignalRad,FilteredPhaseSignalRad,"
             << "SpreadDeg,PhaseVelocityDegS,SignedPhaseVelocityDegS,"
+            << "PhiGpRad,PhiERad,PhiFinalRad,PhiEActive,PhiELatched,PhiETimedOut,PhiEGate,CeLatchRad,TargetPhiRad,"
+            << "PhiEErrorRad,PhiEDotLimitedRadS,AnchorType,"
             << "FreezeRequested,PhaseTrackingEnabled,RecoveryActive,TorqueScale,AllowOutput,"
             << "LeftJointPos,RightJointPos,LeftJointVel,RightJointVel,LeftRawMotorPos,RightRawMotorPos,"
             << "LeftRawMotorVel,RightRawMotorVel,LeftTorqueCmd,RightTorqueCmd\n";
@@ -119,6 +121,18 @@ void ExoLogger::write(const ExoState& state,
             << features.spread_deg << ','
             << features.phase_velocity_deg_s << ','
             << features.signed_phase_velocity_deg_s << ','
+            << phase.phi_gp_rad << ','
+            << phase.phi_e_rad << ','
+            << phase.phi_final_rad << ','
+            << (phase.phi_e_active ? 1 : 0) << ','
+            << (phase.phi_e_latched ? 1 : 0) << ','
+            << (phase.phi_e_timed_out ? 1 : 0) << ','
+            << (phase.phi_e_gate ? 1 : 0) << ','
+            << phase.ce_latch_rad << ','
+            << phase.target_phi_rad << ','
+            << phase.phi_e_error_rad << ','
+            << phase.phi_e_dot_limited_rad_s << ','
+            << phase.anchor_type << ','
             << (freeze.freeze_requested ? 1 : 0) << ','
             << (freeze.phase_tracking_enabled ? 1 : 0) << ','
             << (freeze.recovery_active ? 1 : 0) << ','

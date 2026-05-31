@@ -22,6 +22,14 @@ double PhaseEstimator::wrapAngle(double angle_rad) {
     return wrapped;
 }
 
+double PhaseEstimator::wrapToPi(double angle_rad) {
+    double wrapped = std::fmod(angle_rad + M_PI, 2.0 * M_PI);
+    if (wrapped < 0.0) {
+        wrapped += 2.0 * M_PI;
+    }
+    return wrapped - M_PI;
+}
+
 double PhaseEstimator::clamp01(double value) {
     return std::clamp(value, 0.0, 1.0);
 }
@@ -435,12 +443,161 @@ void PhaseEstimator::tryApplyStartupPrior(const AnchorEventContext& ctx,
     startup_prior_applied_ = true;
 }
 
+double PhaseEstimator::targetPhiFor(AnchorType anchor_type) const {
+    if (anchor_type == AnchorType::Peak) {
+        return config_.phi_e_target_peak_rad + config_.phi_e_target_peak_offset_rad;
+    }
+    return config_.phi_e_target_valley_rad + config_.phi_e_target_valley_offset_rad;
+}
+
+bool PhaseEstimator::allowsPhiEAssistState(AssistState assist_state) const {
+    return assist_state == AssistState::Ramp || assist_state == AssistState::Active;
+}
+
+bool PhaseEstimator::computePhiEGate(const GaitFeatures& features,
+                                     AssistState assist_state,
+                                     double stop_probability,
+                                     bool freeze_requested,
+                                     bool stop_requested) const {
+    if (!config_.phi_e_enabled || !allowsPhiEAssistState(assist_state)) {
+        return false;
+    }
+    if (freeze_requested || stop_requested) {
+        return false;
+    }
+    if (assist_state == AssistState::Stopping || assist_state == AssistState::Frozen ||
+        assist_state == AssistState::Fault) {
+        return false;
+    }
+    if (stop_probability >= config_.phi_e_stop_probability_threshold) {
+        return false;
+    }
+    if (features.spread_deg < config_.anchor_min_spread_deg) {
+        return false;
+    }
+    if (features.phase_velocity_deg_s < config_.phi_e_velocity_deadband_deg_s) {
+        return false;
+    }
+    return true;
+}
+
+bool PhaseEstimator::allowsPhiELatch(AssistState assist_state,
+                                     double stop_probability,
+                                     double anchor_confidence,
+                                     const GaitFeatures& features,
+                                     bool freeze_requested,
+                                     bool stop_requested) const {
+    if (!computePhiEGate(
+            features, assist_state, stop_probability, freeze_requested, stop_requested)) {
+        return false;
+    }
+    if (anchor_confidence < config_.phi_e_min_anchor_confidence) {
+        return false;
+    }
+    return true;
+}
+
+void PhaseEstimator::latchPhiE(AnchorType anchor_type,
+                               double phi_gp,
+                               double anchor_confidence,
+                               PhaseEstimate& estimate) {
+    (void)anchor_confidence;
+    const double target_phi = targetPhiFor(anchor_type);
+    const double pe_latch = wrapToPi(target_phi - phi_gp);
+    double ce_latch = config_.phi_e_ke_base * config_.phi_e_scale * (pe_latch - phi_e_rad_);
+    ce_latch = std::clamp(ce_latch, -config_.phi_e_ce_max_rad, config_.phi_e_ce_max_rad);
+
+    ce_latch_rad_ = ce_latch;
+    pe_latch_rad_ = pe_latch;
+    target_phi_at_anchor_rad_ = target_phi;
+    t_anchor_s_ = now_s_;
+    phi_e_active_ = true;
+    last_phi_e_anchor_type_ = anchor_type;
+
+    estimate.phi_e_latched = true;
+    estimate.ce_latch_rad = ce_latch;
+    estimate.target_phi_rad = target_phi;
+    estimate.phi_e_error_rad = pe_latch;
+    estimate.anchor_type = anchor_type == AnchorType::Peak ? 1 : 2;
+}
+
+void PhaseEstimator::decayPhiE(double dt_s) {
+    const double max_step = config_.phi_e_decay_rate_rad_s * std::max(dt_s, 0.0);
+    phi_e_rad_ = moveToward(phi_e_rad_, 0.0, max_step);
+    if (std::abs(phi_e_rad_) < 1e-9) {
+        phi_e_rad_ = 0.0;
+    }
+}
+
+void PhaseEstimator::updatePhiEOverlay(const GaitFeatures& features,
+                                       AssistState assist_state,
+                                       double stop_probability,
+                                       bool freeze_requested,
+                                       bool stop_requested,
+                                       double dt_s,
+                                       PhaseEstimate& estimate) {
+    const double phi_gp = wrapAngle(oscillator_.phi_GP);
+    const double frequency_hz = std::max(std::abs(oscillator_.omega) / (2.0 * M_PI), 1e-6);
+    const double omega_rad_s = frequency_hz * 2.0 * M_PI;
+
+    const bool force_decay = freeze_requested || stop_requested ||
+                             assist_state == AssistState::Stopping ||
+                             assist_state == AssistState::Frozen ||
+                             assist_state == AssistState::Fault ||
+                             stop_probability >= config_.phi_e_stop_probability_threshold;
+
+    if (force_decay) {
+        phi_e_active_ = false;
+    }
+
+    if (phi_e_active_ && (now_s_ - t_anchor_s_) >
+            config_.phi_e_timeout_period_multiplier / frequency_hz) {
+        phi_e_active_ = false;
+        estimate.phi_e_timed_out = true;
+    }
+
+    const bool gate_phi_e = computePhiEGate(
+        features, assist_state, stop_probability, freeze_requested, stop_requested);
+    estimate.phi_e_gate = gate_phi_e;
+
+    estimate.phi_e_dot_limited_rad_s = 0.0;
+    if (phi_e_active_ && gate_phi_e && config_.phi_e_enabled) {
+        const double dt_since_anchor = std::max(0.0, now_s_ - t_anchor_s_);
+        const double phi_e_dot_raw =
+            ce_latch_rad_ * omega_rad_s * std::exp(-omega_rad_s * dt_since_anchor);
+        const double phi_e_dot = std::clamp(
+            phi_e_dot_raw, -config_.phi_e_rate_max_rad_s, config_.phi_e_rate_max_rad_s);
+        phi_e_rad_ += phi_e_dot * std::max(dt_s, 0.0);
+        phi_e_rad_ = std::clamp(phi_e_rad_, -config_.phi_e_max_rad, config_.phi_e_max_rad);
+        estimate.phi_e_dot_limited_rad_s = phi_e_dot;
+    } else {
+        decayPhiE(dt_s);
+    }
+
+    const double gated_phi_e = gate_phi_e ? phi_e_rad_ : 0.0;
+    estimate.phi_gp_rad = phi_gp;
+    estimate.phi_e_rad = phi_e_rad_;
+    estimate.phi_final_rad = wrapAngle(phi_gp + gated_phi_e);
+    estimate.phase_rad = estimate.phi_final_rad;
+    estimate.phi_e_active = phi_e_active_;
+    estimate.ce_latch_rad = ce_latch_rad_;
+    if (estimate.anchor_type == 0 && phi_e_active_) {
+        estimate.anchor_type = last_phi_e_anchor_type_ == AnchorType::Peak ? 1 : 2;
+    }
+    if (estimate.target_phi_rad == 0.0 && phi_e_active_) {
+        estimate.target_phi_rad = target_phi_at_anchor_rad_;
+        estimate.phi_e_error_rad = pe_latch_rad_;
+    }
+}
+
 PhaseEstimate PhaseEstimator::update(const GaitFeatures& features,
                                      double dt_s,
                                      bool tracking_enabled,
                                      AssistState assist_state,
                                      double stop_probability,
-                                     double motion_confidence) {
+                                     double motion_confidence,
+                                     bool freeze_requested,
+                                     bool stop_requested) {
     now_s_ += dt_s;
     if (!tracking_enabled && previous_tracking_enabled_) {
         reliable_anchor_count_since_tracking_enable_ = 0;
@@ -449,6 +606,10 @@ PhaseEstimate PhaseEstimator::update(const GaitFeatures& features,
         has_pending_anchor_ = false;
         has_deferred_frequency_correction_ = false;
         resetStartupPriorState();
+        phi_e_rad_ = 0.0;
+        ce_latch_rad_ = 0.0;
+        phi_e_active_ = false;
+        t_anchor_s_ = -10.0;
     }
     previous_tracking_enabled_ = tracking_enabled;
 
@@ -515,6 +676,9 @@ PhaseEstimate PhaseEstimator::update(const GaitFeatures& features,
     tryApplyDeferredFrequencyCorrection(ctx, estimate, omega_before_rad_s);
     tryApplyStartupPrior(ctx, estimate, omega_before_rad_s);
 
+    AnchorType confirmed_anchor_type{};
+    bool anchor_confirmed_this_frame = false;
+
     if (config_.anchor_confirm_delay_frames > 0 && has_pending_anchor_) {
         if (confirmPendingAnchor(config_, pending_anchor_type_, curr_velocity_deg_s, features.spread_deg)) {
             AnchorEventContext confirm_ctx = ctx;
@@ -522,6 +686,8 @@ PhaseEstimate PhaseEstimator::update(const GaitFeatures& features,
             confirm_ctx.previous_velocity_abs_deg_s = std::abs(pending_prev_velocity_deg_s_);
             confirm_ctx.current_velocity_abs_deg_s = pending_peak_velocity_abs_deg_s_;
             processAnchorEvent(confirm_ctx, pending_anchor_type_, estimate, omega_before_rad_s);
+            anchor_confirmed_this_frame = estimate.anchor_detected;
+            confirmed_anchor_type = pending_anchor_type_;
         } else {
             estimate.anchor_rejected = true;
             estimate.anchor_reject_reason = static_cast<int>(AnchorRejectReason::ConfirmFailed);
@@ -539,12 +705,25 @@ PhaseEstimate PhaseEstimator::update(const GaitFeatures& features,
         estimate.anchor_candidate = true;
         const AnchorType anchor_type = reliable_peak ? AnchorType::Peak : AnchorType::Valley;
         processAnchorEvent(ctx, anchor_type, estimate, omega_before_rad_s);
+        anchor_confirmed_this_frame = estimate.anchor_detected;
+        confirmed_anchor_type = anchor_type;
     } else if (anchor_candidate) {
         estimate.anchor_rejected = true;
         estimate.anchor_reject_reason = static_cast<int>(AnchorRejectReason::Refractory);
     } else if (positive_peak || negative_peak) {
         estimate.anchor_rejected = true;
         estimate.anchor_reject_reason = static_cast<int>(AnchorRejectReason::UnreliableSignal);
+    }
+
+    if (anchor_confirmed_this_frame && !estimate.anchor_rejected && config_.phi_e_enabled &&
+        allowsPhiELatch(
+            assist_state,
+            stop_probability,
+            estimate.anchor_confidence,
+            features,
+            freeze_requested,
+            stop_requested)) {
+        latchPhiE(confirmed_anchor_type, wrapAngle(oscillator_.phi_GP), estimate.anchor_confidence, estimate);
     }
 
     if (tracking_enabled && omega_target_tracking_active_) {
@@ -562,6 +741,16 @@ PhaseEstimate PhaseEstimator::update(const GaitFeatures& features,
     estimate.ao_signal_estimate_rad = oscillator_.theta_IL_hat;
     estimate.ao_signal_error_rad = oscillator_.error_F;
     estimate.valid = estimate.frequency_hz >= config_.ao_min_frequency_hz * 0.5;
+
+    updatePhiEOverlay(
+        features,
+        assist_state,
+        stop_probability,
+        freeze_requested,
+        stop_requested,
+        dt_s,
+        estimate);
+
     previous_assist_state_ = assist_state;
     return estimate;
 }

@@ -126,7 +126,9 @@ bool ExoController::run() {
             phase_tracking_enabled,
             last_assist_state_,
             last_stop_probability_,
-            last_motion_confidence_);
+            last_motion_confidence_,
+            freeze.freeze_requested,
+            stop.stop_requested);
         // 将相位估计的幅值/频率写回特征，供意图检测使用更一致的观测。
         features.amplitude_rad = phase.amplitude_rad;
         features.frequency_hz = phase.frequency_hz;

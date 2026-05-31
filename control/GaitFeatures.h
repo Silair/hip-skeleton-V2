@@ -22,14 +22,34 @@ struct IntentEstimate {
     double stop_probability = 1.0;
 };
 
+// anchor_type: 0 = none, 1 = peak, 2 = valley.
+enum class PhaseAnchorType : int {
+    None = 0,
+    Peak = 1,
+    Valley = 2,
+};
+
 // 自适应振荡器输出的步态相位、频率、幅值及是否可信；anchor_detected 表示检测到步态锚点。
 struct PhaseEstimate {
+    // phase_rad == phi_final_rad (torque-facing phase).
     double phase_rad = 0.0;
+    double phi_gp_rad = 0.0;
+    double phi_e_rad = 0.0;
+    double phi_final_rad = 0.0;
     double frequency_hz = 0.0;
     double amplitude_rad = 0.0;
     double ao_signal_estimate_rad = 0.0;
     double ao_signal_error_rad = 0.0;
     bool valid = false;
+    bool phi_e_active = false;
+    bool phi_e_latched = false;
+    bool phi_e_timed_out = false;
+    bool phi_e_gate = false;
+    double ce_latch_rad = 0.0;
+    double target_phi_rad = 0.0;
+    double phi_e_error_rad = 0.0;
+    double phi_e_dot_limited_rad_s = 0.0;
+    int anchor_type = 0;
     bool anchor_detected = false;
     bool anchor_candidate = false;
     bool anchor_frequency_updated = false;

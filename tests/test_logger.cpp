@@ -45,6 +45,9 @@ int main() {
 
     exo::PhaseEstimate phase{};
     phase.phase_rad = 1.0;
+    phase.phi_gp_rad = 0.95;
+    phase.phi_e_rad = 0.05;
+    phase.phi_final_rad = 1.0;
     phase.frequency_hz = 0.8;
     phase.amplitude_rad = 0.3;
     phase.ao_signal_estimate_rad = 0.19;
@@ -82,7 +85,8 @@ int main() {
     assert(csv.find("AoSignalEstimateRad,AoSignalErrorRad") != std::string::npos);
     assert(csv.find("PhaseSignalRad,FilteredPhaseSignalRad") != std::string::npos);
     assert(csv.find("SignedPhaseVelocityDegS") != std::string::npos);
-    assert(csv.find("PhaseValid,AnchorDetected") != std::string::npos);
+    assert(csv.find("PhiGpRad,PhiERad,PhiFinalRad") != std::string::npos);
+    assert(csv.find("CeLatchRad,TargetPhiRad") != std::string::npos);
     assert(csv.find("TorqueScale,AllowOutput") != std::string::npos);
     assert(csv.find("0.25,0.2") != std::string::npos);
     assert(csv.find("-22") != std::string::npos);

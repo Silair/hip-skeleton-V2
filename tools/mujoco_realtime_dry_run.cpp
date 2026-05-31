@@ -373,7 +373,9 @@ TorqueCommand updateController(ControlModules& modules, const ControlConfig& con
         phase_tracking_enabled,
         modules.last_assist_state,
         modules.last_stop_probability,
-        modules.last_motion_confidence);
+        modules.last_motion_confidence,
+        modules.freeze.freeze_requested,
+        stop.stop_requested);
     features.amplitude_rad = phase.amplitude_rad;
     features.frequency_hz = phase.frequency_hz;
 

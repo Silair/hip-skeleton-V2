@@ -602,6 +602,107 @@ void test_stop_torque_limiter_handles_negative_torque_without_overshoot() {
     assert(std::abs(limited.right_nm + 1.4) < 1e-9);
 }
 
+void test_phase_estimator_phi_e_zero_in_tracking() {
+    exo::ControlConfig config;
+    config.phase.anchor_confirm_delay_frames = 0;
+    config.phase.reacquire_anchor_warmup_count = 0;
+    config.phase.phi_e_enabled = true;
+    exo::PhaseEstimator estimator(config.phase);
+    exo::GaitFeatures features{};
+
+    const double dt = 0.02;
+    for (int i = 0; i < 200; ++i) {
+        fill_sine_features(features, i * dt, 0.9);
+        features.spread_deg = std::max(features.spread_deg, 20.0);
+        const exo::PhaseEstimate estimate =
+            estimator.update(features, dt, true, exo::AssistState::Tracking, 0.0, 0.6);
+        assert(std::abs(estimate.phi_final_rad - estimate.phi_gp_rad) < 1e-9);
+        assert(!estimate.phi_e_latched);
+    }
+}
+
+void test_phase_estimator_phi_e_bounded_and_decays_on_stop() {
+    exo::ControlConfig config;
+    config.phase.anchor_confirm_delay_frames = 0;
+    config.phase.reacquire_anchor_warmup_count = 0;
+    config.phase.phi_e_enabled = true;
+    config.phase.phi_e_max_rad = 0.15;
+    exo::PhaseEstimator estimator(config.phase);
+    exo::GaitFeatures features{};
+
+    const double dt = 0.02;
+    for (int i = 0; i < 400; ++i) {
+        fill_sine_features(features, i * dt, 0.9);
+        features.spread_deg = std::max(features.spread_deg, 22.0);
+        const exo::PhaseEstimate estimate =
+            estimator.update(features, dt, true, exo::AssistState::Active, 0.0, 0.7);
+        assert(std::abs(estimate.phi_e_rad) <= config.phase.phi_e_max_rad + 1e-9);
+    }
+
+    for (int i = 400; i < 450; ++i) {
+        fill_sine_features(features, i * dt, 0.9);
+        const exo::PhaseEstimate estimate = estimator.update(
+            features, dt, true, exo::AssistState::Active, 0.9, 0.1, true, false);
+        assert(!estimate.phi_e_gate);
+    }
+
+    for (int i = 450; i < 520; ++i) {
+        fill_sine_features(features, i * dt, 0.9);
+        const exo::PhaseEstimate estimate = estimator.update(
+            features, dt, true, exo::AssistState::Active, 0.0, 0.7, false, false);
+        assert(std::abs(estimate.phi_e_rad) < 0.05);
+    }
+}
+
+void test_phase_estimator_phi_e_latches_only_in_ramp_or_active() {
+    exo::ControlConfig config;
+    config.phase.anchor_confirm_delay_frames = 0;
+    config.phase.reacquire_anchor_warmup_count = 0;
+    config.phase.phi_e_enabled = true;
+    exo::PhaseEstimator estimator(config.phase);
+    exo::GaitFeatures features{};
+
+    const double dt = 0.02;
+    bool saw_tracking_latch = false;
+    for (int i = 0; i < 200; ++i) {
+        fill_sine_features(features, i * dt, 0.9);
+        features.spread_deg = std::max(features.spread_deg, 22.0);
+        const exo::PhaseEstimate estimate =
+            estimator.update(features, dt, true, exo::AssistState::Tracking, 0.0, 0.6);
+        saw_tracking_latch = saw_tracking_latch || estimate.phi_e_latched;
+    }
+    assert(!saw_tracking_latch);
+
+    bool saw_active_latch = false;
+    for (int i = 200; i < 500; ++i) {
+        fill_sine_features(features, i * dt, 0.9);
+        features.spread_deg = std::max(features.spread_deg, 22.0);
+        const exo::PhaseEstimate estimate =
+            estimator.update(features, dt, true, exo::AssistState::Active, 0.0, 0.7);
+        saw_active_latch = saw_active_latch || estimate.phi_e_latched;
+    }
+    assert(saw_active_latch);
+}
+
+void test_phase_estimator_phi_e_rate_is_bounded() {
+    exo::ControlConfig config;
+    config.phase.anchor_confirm_delay_frames = 0;
+    config.phase.reacquire_anchor_warmup_count = 0;
+    config.phase.phi_e_enabled = true;
+    config.phase.phi_e_rate_max_rad_s = 0.5;
+    exo::PhaseEstimator estimator(config.phase);
+    exo::GaitFeatures features{};
+
+    const double dt = 0.02;
+    for (int i = 0; i < 500; ++i) {
+        fill_sine_features(features, i * dt, 0.9);
+        features.spread_deg = std::max(features.spread_deg, 22.0);
+        const exo::PhaseEstimate estimate =
+            estimator.update(features, dt, true, exo::AssistState::Active, 0.0, 0.7);
+        assert(std::abs(estimate.phi_e_dot_limited_rad_s) <= config.phase.phi_e_rate_max_rad_s + 1e-9);
+    }
+}
+
 } // namespace
 
 int main() {
@@ -630,5 +731,9 @@ int main() {
     test_stop_detector_exits_when_joint_velocity_returns();
     test_assist_state_machine_stop_request_uses_stopping_state_with_output_until_scale_reaches_zero();
     test_assist_state_machine_freeze_request_disables_output_immediately();
+    test_phase_estimator_phi_e_zero_in_tracking();
+    test_phase_estimator_phi_e_bounded_and_decays_on_stop();
+    test_phase_estimator_phi_e_latches_only_in_ramp_or_active();
+    test_phase_estimator_phi_e_rate_is_bounded();
     return 0;
 }

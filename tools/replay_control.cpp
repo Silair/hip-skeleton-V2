@@ -340,7 +340,9 @@ int runReplay(const ReplayOptions& options) {
             phase_tracking_enabled,
             last_assist_state,
             last_stop_probability,
-            last_motion_confidence);
+            last_motion_confidence,
+            freeze.freeze_requested,
+            stop.stop_requested);
         features.amplitude_rad = phase.amplitude_rad;
         features.frequency_hz = phase.frequency_hz;
 

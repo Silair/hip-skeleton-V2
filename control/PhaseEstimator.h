@@ -34,7 +34,9 @@ public:
                          bool tracking_enabled,
                          AssistState assist_state,
                          double stop_probability = 0.0,
-                         double motion_confidence = 0.0);
+                         double motion_confidence = 0.0,
+                         bool freeze_requested = false,
+                         bool stop_requested = false);
 
 private:
     enum class AnchorType {
@@ -96,6 +98,30 @@ private:
                               PhaseEstimate& estimate,
                               double omega_before_rad_s);
 
+    static double wrapToPi(double angle_rad);
+    double targetPhiFor(AnchorType anchor_type) const;
+    bool allowsPhiEAssistState(AssistState assist_state) const;
+    bool computePhiEGate(const GaitFeatures& features,
+                         AssistState assist_state,
+                         double stop_probability,
+                         bool freeze_requested,
+                         bool stop_requested) const;
+    bool allowsPhiELatch(AssistState assist_state,
+                         double stop_probability,
+                         double anchor_confidence,
+                         const GaitFeatures& features,
+                         bool freeze_requested,
+                         bool stop_requested) const;
+    void latchPhiE(AnchorType anchor_type, double phi_gp, double anchor_confidence, PhaseEstimate& estimate);
+    void decayPhiE(double dt_s);
+    void updatePhiEOverlay(const GaitFeatures& features,
+                           AssistState assist_state,
+                           double stop_probability,
+                           bool freeze_requested,
+                           bool stop_requested,
+                           double dt_s,
+                           PhaseEstimate& estimate);
+
     PhaseConfig config_;
     MultiHarmonicAO oscillator_;
     double last_signal_rad_ = 0.0;
@@ -129,6 +155,14 @@ private:
     double startup_tracking_enter_time_s_ = -10.0;
     AssistState previous_assist_state_ = AssistState::Transparent;
     double now_s_ = 0.0;
+
+    double phi_e_rad_ = 0.0;
+    double ce_latch_rad_ = 0.0;
+    double t_anchor_s_ = -10.0;
+    double pe_latch_rad_ = 0.0;
+    double target_phi_at_anchor_rad_ = 0.0;
+    bool phi_e_active_ = false;
+    AnchorType last_phi_e_anchor_type_ = AnchorType::Peak;
 };
 
 } // namespace exo

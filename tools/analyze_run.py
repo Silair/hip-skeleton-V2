@@ -55,6 +55,19 @@ def fnum(row: Dict[str, str], key: str, default: float = 0.0) -> float:
         return default
 
 
+def torque_phase_rad(row: Dict[str, str]) -> float:
+    """Torque-facing phase: PhiFinalRad when present, else legacy Phase column."""
+    if row.get("PhiFinalRad", "") != "":
+        return fnum(row, "PhiFinalRad")
+    return fnum(row, "Phase")
+
+
+def ao_phase_rad(row: Dict[str, str]) -> float:
+    if row.get("PhiGpRad", "") != "":
+        return fnum(row, "PhiGpRad")
+    return fnum(row, "Phase")
+
+
 def is_anchor_stop_context(row: Dict[str, str], stop_probability_threshold: float = 0.8) -> bool:
     """Stopping assist state or high stop intent — anchor activity here is stop-context only."""
     return int(fnum(row, "AssistState", -1.0)) == 4 or fnum(row, "StopProbability", 0.0) >= stop_probability_threshold
@@ -337,7 +350,7 @@ def adaptation_transition_metrics(
                 "time_s": fnum(row, "MonoTimeS"),
                 "ref_freq_hz": freq_ref,
                 "frequency_error_hz": abs(fnum(row, "Frequency") - freq_ref),
-                "phase_error_percent": abs(wrap_to_pi(fnum(row, "Phase") - phase_ref)) / TAU * 100.0,
+                "phase_error_percent": abs(wrap_to_pi(torque_phase_rad(row) - phase_ref)) / TAU * 100.0,
             }
         )
 
@@ -478,7 +491,7 @@ def local_peak_phase_errors(rows: Sequence[Dict[str, str]], lead_angle_rad: floa
     for i in range(1, len(rows) - 1):
         if not is_gait_torque_row(rows[i]):
             continue
-        phase = fnum(rows[i], "Phase")
+        phase = torque_phase_rad(rows[i])
         left = fnum(rows[i], "LeftTorqueCmd")
         right = fnum(rows[i], "RightTorqueCmd")
         if left > left_threshold and left >= fnum(rows[i - 1], "LeftTorqueCmd") and left >= fnum(rows[i + 1], "LeftTorqueCmd"):
@@ -493,7 +506,7 @@ def compute_metrics(rows: Sequence[Dict[str, str]], peak_min_spread_deg: float =
 
     phase_eval_pairs = [(row, ref) for row, ref in zip(rows, ref_phase) if ref is not None and is_gait_torque_row(row)]
     freq_eval_pairs = [(row, ref) for row, ref in zip(rows, ref_freq) if ref is not None and is_gait_torque_row(row)]
-    phase_errors = [wrap_to_pi(fnum(row, "Phase") - ref) for row, ref in phase_eval_pairs]
+    phase_errors = [wrap_to_pi(torque_phase_rad(row) - ref) for row, ref in phase_eval_pairs]
     abs_phase_percent = [abs(e) / TAU * 100.0 for e in phase_errors]
     freq_errors = [fnum(row, "Frequency") - ref for row, ref in freq_eval_pairs]
     reconstruction_errors = [fnum(row, "AoSignalErrorRad") for row in rows if "AoSignalErrorRad" in row and row.get("AoSignalErrorRad", "") != ""]
@@ -592,7 +605,7 @@ def compute_metrics(rows: Sequence[Dict[str, str]], peak_min_spread_deg: float =
 
     convergence_time_s: Optional[float] = None
     if phase_errors:
-        valid_pairs = [(fnum(row, "MonoTimeS"), abs(wrap_to_pi(fnum(row, "Phase") - ref)) / TAU * 100.0) for row, ref in phase_eval_pairs]
+        valid_pairs = [(fnum(row, "MonoTimeS"), abs(wrap_to_pi(torque_phase_rad(row) - ref)) / TAU * 100.0) for row, ref in phase_eval_pairs]
         for t, err in valid_pairs:
             if err <= 5.0:
                 convergence_time_s = t - valid_pairs[0][0]
@@ -722,12 +735,12 @@ def write_reports(rows: Sequence[Dict[str, str]], metrics: Dict[str, object], ev
                 out["PhaseErrorDeg"] = ""
                 out["PhaseErrorPercent"] = ""
             else:
-                err = wrap_to_pi(fnum(row, "Phase") - rp)
+                err = wrap_to_pi(torque_phase_rad(row) - rp)
                 out["PhaseErrorDeg"] = f"{err * RAD_TO_DEG:.6f}"
                 out["PhaseErrorPercent"] = f"{err / TAU * 100.0:.6f}"
             writer.writerow(out)
 
-    phase_points = [(fnum(r, "MonoTimeS"), fnum(r, "Phase") * RAD_TO_DEG) for r in rows]
+    phase_points = [(fnum(r, "MonoTimeS"), torque_phase_rad(r) * RAD_TO_DEG) for r in rows]
     ref_points = [(fnum(r, "MonoTimeS"), rp * RAD_TO_DEG) for r, rp in zip(rows, ref_phase) if rp is not None]
     freq_points = series_points(rows, "Frequency")
     ref_freq_points = [(fnum(r, "MonoTimeS"), rf) for r, rf in zip(rows, ref_freq) if rf is not None]

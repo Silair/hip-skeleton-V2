@@ -101,6 +101,23 @@ struct PhaseConfig {
     double startup_prior_tracking_gain_scale = 0.50;
     double startup_prior_min_apply_time_s = 0.50;
     double startup_prior_min_confidence_to_apply = 0.45;
+
+    // V3 Phase 1: event-latched phi_e overlay on phi_GP (Ramp/Active only).
+    bool phi_e_enabled = true;
+    double phi_e_ke_base = 0.20;
+    double phi_e_scale = 1.0;
+    double phi_e_ce_max_rad = 0.25;
+    double phi_e_rate_max_rad_s = 0.80;
+    double phi_e_max_rad = 0.20;
+    double phi_e_decay_rate_rad_s = 2.0;
+    double phi_e_target_peak_rad = 1.5707963267948966;
+    double phi_e_target_peak_offset_rad = 0.0;
+    double phi_e_target_valley_rad = 4.71238898038469;
+    double phi_e_target_valley_offset_rad = 0.0;
+    double phi_e_stop_probability_threshold = 0.65;
+    double phi_e_velocity_deadband_deg_s = 8.0;
+    double phi_e_min_anchor_confidence = 0.55;
+    double phi_e_timeout_period_multiplier = 2.0;
 };
 
 // 总控：主循环频率、单次运行时长，以及上面各子配置嵌套结构体。
